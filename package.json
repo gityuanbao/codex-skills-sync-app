@@ -1,11 +1,19 @@
 {
-  "name": "codex-skill-sync",
+  "name": "codex-skills-sync-app",
   "version": "0.3.3",
-  "description": "一个基于 Git 的 Codex 技能跨电脑同步工具。",
+  "description": "面向 macOS 和 Windows 的 Codex Skills 中文自动同步桌面工具。",
   "author": {
-    "name": "Dorian"
+    "name": "Git源宝 (Dorian)"
   },
   "license": "MIT",
+  "homepage": "https://github.com/gityuanbao/codex-skills-sync-app#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gityuanbao/codex-skills-sync-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gityuanbao/codex-skills-sync-app/issues"
+  },
   "type": "commonjs",
   "main": "desktop/main.js",
   "bin": {

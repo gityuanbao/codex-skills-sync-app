@@ -1,0 +1,83 @@
+{
+  "name": "codex-skill-sync",
+  "version": "0.3.3",
+  "description": "一个基于 Git 的 Codex 技能跨电脑同步工具。",
+  "author": {
+    "name": "Dorian"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "desktop/main.js",
+  "bin": {
+    "skill-sync": "./bin/skill-sync.js",
+    "skill-sync-ui": "./bin/skill-sync-ui.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "doctor": "node ./bin/skill-sync.js doctor",
+    "help": "node ./bin/skill-sync.js help",
+    "ui": "node ./bin/skill-sync-ui.js",
+    "desktop": "electron .",
+    "desktop:icons": "electron ./desktop/generate-icon.js",
+    "desktop:dir": "npm run desktop:icons && electron-builder --dir",
+    "desktop:mac": "npm run desktop:icons && electron-builder --mac dmg",
+    "desktop:win": "npm run desktop:icons && electron-builder --win nsis --x64 --config desktop/electron-builder.win.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "build": {
+    "appId": "com.codexskillsync.desktop",
+    "productName": "Codex 技能同步器",
+    "artifactName": "Codex-Skill-Sync-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "afterPack": "desktop/after-pack.js",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "bin/**/*",
+      "desktop/**/*",
+      "web/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "vendor/gh/darwin-arm64",
+          "to": "vendor/gh"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "vendor/gh/win32-x64",
+          "to": "vendor/gh"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex 技能同步器</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="loading-view" id="loadingView">
+      <div class="app-logo" aria-hidden="true"></div>
+      <p>正在检查这台电脑上的 Codex 技能...</p>
+    </div>
+
+    <div class="setup-shell" id="onboardingView" hidden>
+      <header class="setup-header">
+        <div class="brand-lockup">
+          <div class="app-logo" aria-hidden="true"></div>
+          <div>
+            <strong>Codex 技能同步器</strong>
+            <span>第一次设置</span>
+          </div>
+        </div>
+        <span class="privacy-label">只同步技能文件</span>
+      </header>
+
+      <div class="setup-layout">
+        <aside class="setup-progress" aria-label="设置进度">
+          <ol>
+            <li class="active" data-step-marker="1"><span>1</span><div><strong>检查技能</strong><small>确认本机内容</small></div></li>
+            <li data-step-marker="2"><span>2</span><div><strong>连接 GitHub</strong><small>建立私人空间</small></div></li>
+            <li data-step-marker="3"><span>3</span><div><strong>选择方式</strong><small>确定同步方向</small></div></li>
+            <li data-step-marker="4"><span>4</span><div><strong>开始同步</strong><small>以后自动完成</small></div></li>
+          </ol>
+          <p>不需要登录 GPT，也不会同步聊天记录、账号信息或 API Key。</p>
+        </aside>
+
+        <main class="setup-main">
+          <section class="setup-step active" data-step="1">
+            <p class="step-kicker">第 1 步，共 4 步</p>
+            <h1>先看看这台电脑</h1>
+            <p class="step-intro">软件会自动找到 Codex 使用的技能文件夹，你不需要选择路径。</p>
+
+            <div class="detection-result" id="skillDetection">
+              <span class="result-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong id="detectedSkillTitle">正在检查技能</strong>
+                <p id="detectedSkillText">请稍候...</p>
+              </div>
+            </div>
+
+            <details class="plain-details">
+              <summary>查看识别到的位置</summary>
+              <code id="detectedSkillsPath">正在检查</code>
+            </details>
+
+            <p class="inline-error" id="environmentError" hidden></p>
+            <div class="setup-actions">
+              <button class="button primary" id="toGitHubButton">继续</button>
+            </div>
+          </section>
+
+          <section class="setup-step" data-step="2">
+            <p class="step-kicker">第 2 步，共 4 步</p>
+            <h1>连接 GitHub</h1>
+            <p class="step-intro">GitHub 会作为多台电脑共同使用的私人技能保险箱。软件会自动创建仓库，不需要你学习 Git。</p>
+
+            <div class="security-note">
+              <strong>不会向软件输入 GitHub 密码</strong>
+              <p>点击连接后，会打开 GitHub 官方授权页面。密码和验证码只在 GitHub 页面中填写，本软件看不到这些内容。</p>
+            </div>
+            <p class="proxy-note" id="proxyStatus" hidden>已自动使用本机网络代理</p>
+
+            <div class="account-result" id="githubAccount" hidden>
+              <span class="account-avatar" aria-hidden="true">GH</span>
+              <div>
+                <strong id="githubAccountName">已连接 GitHub</strong>
+                <p id="githubAccountText"></p>
+              </div>
+              <span class="success-label">已连接</span>
+            </div>
+
+            <p class="inline-error" id="githubError" hidden></p>
+            <div class="setup-actions spread">
+              <button class="button quiet" data-back-step="1">返回</button>
+              <button class="button primary" id="connectGitHubButton">使用浏览器连接 GitHub</button>
+              <button class="button primary" id="toRoleButton" hidden>继续</button>
+            </div>
+            <div class="login-help" id="githubLoginHelp" hidden>
+              <p class="action-hint">一次性授权码会自动填入 GitHub 页面；如果页面仍为空，授权码也已复制，可直接粘贴。</p>
+              <button class="button quiet small" id="openGitHubDeviceButton" data-allow-while-busy="true">浏览器没有打开？重新打开</button>
+            </div>
+          </section>
+
+          <section class="setup-step" data-step="3">
+            <p class="step-kicker">第 3 步，共 4 步</p>
+            <h1>这台电脑上的技能是什么情况？</h1>
+            <p class="step-intro">这个选择只影响第一次同步。以后每台电脑都会自动双向同步。</p>
+
+            <div class="role-options">
+              <label class="role-option selected" id="sourceRoleOption">
+                <input type="radio" name="computerRole" value="source" checked>
+                <span class="role-symbol" aria-hidden="true">↑</span>
+                <span>
+                  <strong>这台电脑的技能最完整</strong>
+                  <small id="sourceRoleHelp">把本机技能作为第一份版本保存到 GitHub</small>
+                </span>
+                <span class="radio-dot" aria-hidden="true"></span>
+              </label>
+              <label class="role-option">
+                <input type="radio" name="computerRole" value="receiver">
+                <span class="role-symbol" aria-hidden="true">↓</span>
+                <span>
+                  <strong>我要从其他电脑获取技能</strong>
+                  <small>先下载 GitHub 上已有的版本，本机同名文件不会被悄悄覆盖</small>
+                </span>
+                <span class="radio-dot" aria-hidden="true"></span>
+              </label>
+            </div>
+
+            <div class="setup-actions spread">
+              <button class="button quiet" data-back-step="2">返回</button>
+              <button class="button primary" id="toFinishButton">继续</button>
+            </div>
+          </section>
+
+          <section class="setup-step" data-step="4">
+            <p class="step-kicker">第 4 步，共 4 步</p>
+            <h1>准备开始自动同步</h1>
+            <p class="step-intro">确认一次即可，以后打开 Codex 或修改技能时都会自动检查更新。</p>
+
+            <div class="setup-summary">
+              <div><span>GitHub</span><strong id="summaryAccount">未连接</strong></div>
+              <div><span>本机技能</span><strong id="summarySkills">0 个</strong></div>
+              <div><span>首次方式</span><strong id="summaryRole">使用本机版本</strong></div>
+              <div><span>云端位置</span><strong>自动创建私人仓库</strong></div>
+            </div>
+
+            <div class="preference-list">
+              <label><input type="checkbox" id="setupLaunchAtLogin" checked><span><strong>开机后自动运行</strong><small>无需每次手动打开软件</small></span></label>
+              <label><input type="checkbox" id="setupInstallHook" checked><span><strong>打开 Codex 时检查一次</strong><small>确保开始工作前拿到最新技能</small></span></label>
+            </div>
+
+            <p class="inline-error" id="setupError" hidden></p>
+            <div class="setup-actions spread">
+              <button class="button quiet" data-back-step="3">返回</button>
+              <button class="button primary" id="startSyncButton">开始同步</button>
+            </div>
+            <p class="action-hint" id="setupProgressText" hidden>正在建立私人仓库并同步技能，请不要关闭软件...</p>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="app-shell" id="dashboardView" hidden>
+      <header class="app-header">
+        <div class="brand-lockup">
+          <div class="app-logo" aria-hidden="true"></div>
+          <div>
+            <strong>Codex 技能同步器</strong>
+            <span id="accountLabel">自动保护你的技能</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span class="header-state" id="headerState">正在检查</span>
+          <button class="icon-button" id="refreshButton" title="刷新状态" aria-label="刷新状态">↻</button>
+        </div>
+      </header>
+
+      <main class="dashboard-main">
+        <section class="sync-status-band" id="syncStatusBand">
+          <div class="large-status-icon" id="largeStatusIcon" aria-hidden="true">✓</div>
+          <div class="status-copy">
+            <p class="status-kicker">同步状态</p>
+            <h1 id="mainStatusTitle">技能已是最新版本</h1>
+            <p id="mainStatusText">正在读取上次同步时间</p>
+          </div>
+          <button class="button primary" id="syncNowButton">立即同步</button>
+        </section>
+
+        <section class="overview-strip" aria-label="同步概览">
+          <div><span>已同步</span><strong id="sameCount">0</strong></div>
+          <div><span>等待同步</span><strong id="differentCount">0</strong></div>
+          <div><span>仅在本机</span><strong id="localOnlyCount">0</strong></div>
+          <div><span>等待下载</span><strong id="missingLocalCount">0</strong></div>
+        </section>
+
+        <div class="dashboard-grid">
+          <section class="content-panel skill-panel">
+            <div class="section-heading">
+              <div>
+                <h2>我的技能</h2>
+                <p id="skillListSummary">正在读取技能...</p>
+              </div>
+              <button class="button small" id="openSkillsButton">打开技能文件夹</button>
+            </div>
+            <div class="skill-list" id="skillsList">
+              <p class="empty-state">暂无技能</p>
+            </div>
+          </section>
+
+          <aside class="content-panel settings-panel">
+            <div class="section-heading">
+              <div>
+                <h2>自动同步</h2>
+                <p>推荐保持以下选项开启</p>
+              </div>
+              <span class="state-pill" id="autoSyncState">检查中</span>
+            </div>
+            <div class="settings-list">
+              <label class="setting-row"><span><strong>后台自动同步</strong><small>技能变化后自动保存</small></span><input id="autoSyncInput" type="checkbox" checked></label>
+              <label class="setting-row"><span><strong>启动软件时同步</strong><small>打开后立即检查更新</small></span><input id="syncOnStartInput" type="checkbox" checked></label>
+              <label class="setting-row"><span><strong>开机自动运行</strong><small>不必手动打开</small></span><input id="launchAtLoginInput" type="checkbox"></label>
+              <label class="setting-row"><span><strong>关闭窗口后继续</strong><small>保留在菜单栏或系统托盘</small></span><input id="closeToTrayInput" type="checkbox" checked></label>
+            </div>
+            <p class="inline-error" id="desktopError" hidden></p>
+          </aside>
+        </div>
+
+        <details class="advanced-section">
+          <summary>高级设置与故障排查</summary>
+          <div class="advanced-content">
+            <section>
+              <h3>同步位置</h3>
+              <label class="field"><span>GitHub 仓库</span><input id="remoteInput" type="text" placeholder="https://github.com/用户名/codex-skill-sync.git"></label>
+              <label class="field"><span>本地同步仓库</span><span class="input-with-action"><input id="repoInput" type="text"><button class="button small" id="selectRepoButton">选择</button></span></label>
+              <label class="field"><span>Codex 技能文件夹</span><span class="input-with-action"><input id="skillsDirInput" type="text"><button class="button small" id="selectSkillsButton">选择</button></span></label>
+              <label class="check-line"><input id="importExistingInput" type="checkbox"><span>把当前电脑的技能作为首次版本</span></label>
+              <button class="button" id="initButton">保存高级配置</button>
+            </section>
+
+            <section>
+              <h3>维修工具</h3>
+              <div class="tool-grid">
+                <button class="button" data-action="doctor">检查环境</button>
+                <button class="button" data-action="pull">只获取更新</button>
+                <button class="button" data-action="import">重新读取本机技能</button>
+                <button class="button" data-action="publish">立即上传本机版本</button>
+                <button class="button" id="installHookButton">重新安装 Codex 启动同步</button>
+                <button class="button" id="openRepoButton">打开同步仓库</button>
+                <button class="button" id="openConflictsButton">打开冲突备份</button>
+              </div>
+              <label class="field compact-field"><span>自动检查间隔（秒）</span><input id="syncIntervalInput" type="number" min="15" max="3600" step="5" value="30"></label>
+            </section>
+          </div>
+
+          <details class="log-details">
+            <summary>查看运行日志</summary>
+            <div class="log-heading"><span id="commandLine">尚未执行命令</span><button class="button small" id="clearLogButton">清空</button></div>
+            <pre id="logOutput"></pre>
+          </details>
+        </details>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

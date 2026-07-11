@@ -1,0 +1,24 @@
+{
+  "name": "codex-skill-sync",
+  "version": "0.2.0",
+  "description": "基于 Git 的个人 Codex 技能安全双向同步工具。",
+  "author": {
+    "name": "Dorian"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex 技能同步器",
+    "shortDescription": "在多台电脑之间同步个人 Codex 技能。",
+    "longDescription": "Codex 技能同步器使用 Git 仓库管理个人 Codex 技能，支持安全双向合并、冲突保护、状态检查和启动同步。",
+    "developerName": "Dorian",
+    "category": "Productivity",
+    "capabilities": [
+      "Write"
+    ],
+    "defaultPrompt": [
+      "检查我的 Codex 技能同步状态。",
+      "安全同步最新 Codex 技能。",
+      "排查 Codex 技能同步冲突。"
+    ]
+  }
+}

@@ -3,6 +3,7 @@
   <h1>Codex Skills Sync</h1>
   <p><strong>Codex 技能同步器</strong></p>
   <p>让多台 Mac 和 Windows 自动拥有同一套 Codex Skills。</p>
+  <p>由 <a href="#关于作者"><strong>Git源宝</strong></a> 开源维护</p>
 
   <p>
     <a href="https://github.com/gityuanbao/codex-skills-sync-app/releases/latest"><img src="https://img.shields.io/github/v/release/gityuanbao/codex-skills-sync-app?label=最新版" alt="最新版本"></a>
@@ -172,6 +173,16 @@ npm run desktop:win
 Windows 安装包可以在 Mac 上交叉构建，但正式发布前仍应在 Windows 真机验证安装、系统托盘和凭据管理器。
 
 欢迎通过 Issues 报告问题，也欢迎提交 Pull Request 改进中文体验、平台兼容性和同步安全。
+
+## 关于作者
+
+本项目由 **Git源宝** 发起并维护，希望让中文 Codex 用户更轻松地管理和同步自己的 Skills。你可以通过以下平台关注项目更新、AI 工具实测和相关教程：
+
+| 平台 | 账号 | 关注方式 |
+| --- | --- | --- |
+| B站 | Git源宝 | [访问 B站主页](https://space.bilibili.com/38061207) |
+| 抖音 | Git源宝 | [访问抖音主页](https://www.douyin.com/user/MS4wLjABAAAArAKj7BGfaz8nbPk8NVIpOH6P6Uxqm7M1uM6SG2dFxRtoymhcsTTjFELLuen7CxPj) |
+| 微信公众号 | Git源宝 | 微信内搜索公众号 `Git源宝` |
 
 ## 开源协议
 

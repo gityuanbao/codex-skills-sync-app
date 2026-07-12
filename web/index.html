@@ -21,7 +21,10 @@
             <span>第一次设置</span>
           </div>
         </div>
-        <span class="privacy-label">只同步技能文件</span>
+        <div class="setup-header-actions">
+          <span class="privacy-label">只同步技能文件</span>
+          <button class="button quiet small" id="cancelOnboardingButton" hidden>返回同步首页</button>
+        </div>
       </header>
 
       <div class="setup-layout">
@@ -71,6 +74,15 @@
             </div>
             <p class="proxy-note" id="proxyStatus" hidden>已自动使用本机网络代理</p>
 
+            <div class="connection-check" id="githubNetworkStatus">
+              <span class="connection-dot" id="githubNetworkDot" aria-hidden="true"></span>
+              <div>
+                <strong id="githubNetworkTitle">尚未检测 GitHub 连接</strong>
+                <p id="githubNetworkText">登录遇到问题时，可以先检查网络和代理。</p>
+              </div>
+              <button class="button small" id="diagnoseGitHubSetupButton">检测连接</button>
+            </div>
+
             <div class="account-result" id="githubAccount" hidden>
               <span class="account-avatar" aria-hidden="true">GH</span>
               <div>
@@ -87,8 +99,13 @@
               <button class="button primary" id="toRoleButton" hidden>继续</button>
             </div>
             <div class="login-help" id="githubLoginHelp" hidden>
-              <p class="action-hint">一次性授权码会自动填入 GitHub 页面；如果页面仍为空，授权码也已复制，可直接粘贴。</p>
+              <p class="action-hint">一次性授权码会自动填入 GitHub 页面；如果页面仍为空，可在下方复制后粘贴。</p>
               <button class="button quiet small" id="openGitHubDeviceButton" data-allow-while-busy="true">浏览器没有打开？重新打开</button>
+            </div>
+            <div class="device-code-panel" id="deviceCodePanel" hidden>
+              <span>一次性授权码</span>
+              <code id="deviceCodeText">----</code>
+              <button class="button small" id="copyDeviceCodeButton" data-allow-while-busy="true">复制授权码</button>
             </div>
           </section>
 
@@ -241,6 +258,23 @@
                 <button class="button" id="openConflictsButton">打开冲突备份</button>
               </div>
               <label class="field compact-field"><span>自动检查间隔（秒）</span><input id="syncIntervalInput" type="number" min="15" max="3600" step="5" value="30"></label>
+            </section>
+
+            <section class="app-tools">
+              <div class="app-tools-heading">
+                <div>
+                  <h3>应用与账号</h3>
+                  <p><strong id="appVersionLabel">当前版本</strong><span id="updateStatus">尚未检查更新</span></p>
+                </div>
+              </div>
+              <div class="tool-grid app-tool-grid">
+                <button class="button" id="diagnoseGitHubDashboardButton">检测 GitHub 连接</button>
+                <button class="button" id="reconnectGitHubButton">退出并重新连接 GitHub</button>
+                <button class="button" id="restartOnboardingButton">重新运行首次设置</button>
+                <button class="button" id="checkUpdateButton">检查新版本</button>
+                <button class="button" id="openReleaseButton">打开发布页</button>
+              </div>
+              <p class="inline-error" id="maintenanceError" hidden></p>
             </section>
           </div>
 

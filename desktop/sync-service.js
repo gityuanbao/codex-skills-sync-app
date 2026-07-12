@@ -9,7 +9,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   syncOnStart: true,
   syncIntervalSeconds: 30,
   launchAtLogin: false,
-  closeToTray: true
+  closeToTray: true,
+  showOnboarding: false
 });
 
 class SyncService {
@@ -20,7 +21,7 @@ class SyncService {
 
     this.runCommand = options.runCommand;
     this.onStateChange = options.onStateChange || (() => {});
-    this.settingsPath = process.env.SKILL_SYNC_DESKTOP_CONFIG
+    this.settingsPath = options.settingsPath || process.env.SKILL_SYNC_DESKTOP_CONFIG
       || path.join(os.homedir(), ".codex-skill-sync", "desktop.json");
     this.settings = this.loadSettings();
     this.state = {
@@ -82,7 +83,7 @@ class SyncService {
   async updateSettings(patch = {}) {
     const previous = this.settings;
     const next = { ...this.settings };
-    for (const key of ["autoSync", "syncOnStart", "launchAtLogin", "closeToTray"]) {
+    for (const key of ["autoSync", "syncOnStart", "launchAtLogin", "closeToTray", "showOnboarding"]) {
       if (Object.prototype.hasOwnProperty.call(patch, key)) {
         next[key] = Boolean(patch[key]);
       }

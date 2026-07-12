@@ -15,8 +15,9 @@ const {
 } = require("electron");
 const { runSkillSyncAsync, startServer } = require("../bin/skill-sync-ui");
 const { SyncService } = require("./sync-service");
-const { GitHubService } = require("./github-service");
+const { GitHubService, RELEASE_PAGE_URL } = require("./github-service");
 const { applyProxyEnvironment, detectNetworkProxy } = require("./proxy-service");
+const { compareVersions } = require("./version-utils");
 
 const APP_NAME = "Codex 技能同步器";
 const syncOnceRequested = process.argv.includes("--sync-once");
@@ -228,8 +229,28 @@ function createDesktopBridge() {
     openPath: openConfiguredPath,
     getOnboardingStatus,
     connectGitHub: () => githubService.login(),
+    getGitHubDeviceInfo: async () => githubService.getPendingDeviceInfo(),
     openGitHubDevice: async () => {
       await githubService.openPendingDevicePage();
+      return { opened: true };
+    },
+    diagnoseGitHub: () => githubService.diagnoseNetwork(),
+    reconnectGitHub: async () => {
+      await githubService.logout();
+      await syncService.updateSettings({ showOnboarding: true });
+      return getOnboardingStatus();
+    },
+    startOnboarding: async () => {
+      await syncService.updateSettings({ showOnboarding: true });
+      return getOnboardingStatus();
+    },
+    finishOnboarding: async () => {
+      await syncService.updateSettings({ showOnboarding: false });
+      return getOnboardingStatus();
+    },
+    checkForUpdate: checkForUpdate,
+    openReleasePage: async () => {
+      await shell.openExternal(RELEASE_PAGE_URL);
       return { opened: true };
     },
     simpleSetup: runSimpleSetup
@@ -251,6 +272,7 @@ async function getOnboardingStatus() {
 
   return {
     configured: Boolean(status),
+    showOnboarding: Boolean(syncService.settings.showOnboarding),
     skillsDir: status && status.skillsDir || doctor.settings && doctor.settings.skillsDir || "",
     localSkillCount,
     remote: status && status.remote || "",
@@ -295,6 +317,7 @@ async function runSimpleSetup(options = {}) {
     syncOnStart: true,
     launchAtLogin: options.launchAtLogin !== false,
     closeToTray: true,
+    showOnboarding: false,
     syncIntervalSeconds: 30
   });
   await syncService.configurationChanged();
@@ -323,6 +346,17 @@ async function runSimpleSetup(options = {}) {
   };
 }
 
+async function checkForUpdate() {
+  const currentVersion = app.getVersion();
+  const latest = await githubService.getLatestRelease();
+  return {
+    currentVersion,
+    latestVersion: latest.version,
+    updateAvailable: compareVersions(latest.version, currentVersion) > 0,
+    release: latest
+  };
+}
+
 function withAppStatus(status) {
   return {
     ...status,
@@ -333,7 +367,8 @@ function withAppStatus(status) {
       packaged: app.isPackaged,
       launchAtLogin: app.getLoginItemSettings().openAtLogin,
       canLaunchAtLogin: process.platform === "darwin" || process.platform === "win32",
-      proxy: networkProxy ? { enabled: true, source: networkProxy.source } : { enabled: false, source: "" }
+      proxy: networkProxy ? { enabled: true, source: networkProxy.source } : { enabled: false, source: "" },
+      releasePageUrl: RELEASE_PAGE_URL
     }
   };
 }

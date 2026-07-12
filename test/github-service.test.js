@@ -4,10 +4,12 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  RELEASE_PAGE_URL,
   GitHubService,
   cleanGitHubError,
   runProcess,
   sanitizeRepositoryName,
+  trustedReleaseUrl,
   withGitHubDeviceCode
 } = require("../desktop/github-service");
 
@@ -86,13 +88,16 @@ test("automatically confirms only the two GitHub CLI browser prompts", async () 
 test("opens the GitHub device page with its one-time code prefilled", async () => {
   const fixture = path.join(__dirname, "fixtures", "fake-github-login-url.js");
   const opened = [];
+  const codes = [];
   const result = await runProcess(process.execPath, [fixture], {
     timeoutMs: 5000,
     interactiveGitHubLogin: true,
     openBrowser: async (url) => opened.push(url),
+    onDeviceCode: async (code) => codes.push(code),
     env: { LANG: "C", LC_ALL: "C" }
   });
   assert.equal(result.ok, true);
+  assert.deepEqual(codes, ["ABCD-EFGH"]);
   assert.deepEqual(opened, ["https://github.com/login/device?user_code=ABCD-EFGH"]);
 });
 
@@ -111,6 +116,79 @@ test("redacts a one-time code from GitHub errors", () => {
   const message = cleanGitHubError(fail("One-time code (ABCD-EFGH) was not accepted"));
   assert.doesNotMatch(message, /ABCD-EFGH/);
   assert.match(message, /一次性授权码/);
+});
+
+test("logs out the active GitHub account without touching repositories", async () => {
+  const calls = [];
+  let loggedOut = false;
+  const runner = async (_command, args) => {
+    calls.push(args);
+    if (args[0] === "--version") return ok("gh version 2.94.0");
+    if (args[0] === "auth" && args[1] === "status" && args.includes("--json")) {
+      return ok(JSON.stringify({
+        hosts: { "github.com": [{ login: "octocat", active: true }] }
+      }));
+    }
+    if (args[0] === "auth" && args[1] === "logout") {
+      loggedOut = true;
+      return ok();
+    }
+    if (args[0] === "auth" && args[1] === "status") {
+      return loggedOut ? fail("not logged in") : ok();
+    }
+    return fail();
+  };
+  const service = new GitHubService({ runner });
+  const status = await service.logout();
+  assert.equal(status.authenticated, false);
+  assert.deepEqual(
+    calls.find((args) => args[0] === "auth" && args[1] === "logout"),
+    ["auth", "logout", "--hostname", "github.com", "--user", "octocat"]
+  );
+  assert.equal(calls.some((args) => args[0] === "repo"), false);
+});
+
+test("diagnoses a GitHub timeout and reports the active proxy", async () => {
+  let command = null;
+  let args = null;
+  const service = new GitHubService({
+    gitExecutable: "test-git",
+    prepareNetwork: async () => ({ url: "http://127.0.0.1:7890", source: "local" }),
+    networkRunner: async (nextCommand, nextArgs) => {
+      command = nextCommand;
+      args = nextArgs;
+      return fail("dial tcp: i/o timeout");
+    }
+  });
+  const result = await service.diagnoseNetwork();
+  assert.equal(command, "test-git");
+  assert.deepEqual(args, [
+    "ls-remote",
+    "--exit-code",
+    "https://github.com/cli/cli.git",
+    "HEAD"
+  ]);
+  assert.equal(result.online, false);
+  assert.equal(result.viaProxy, true);
+  assert.equal(result.proxySource, "local");
+  assert.match(result.message, /超时/);
+});
+
+test("reads the latest release and rejects untrusted release links", async () => {
+  const runner = async (_command, args) => {
+    if (args[0] !== "api") return fail();
+    return ok(JSON.stringify({
+      tag_name: "v0.3.4",
+      name: "Codex 技能同步器 v0.3.4",
+      published_at: "2026-07-12T00:00:00Z",
+      html_url: "https://github.com/gityuanbao/codex-skills-sync-app/releases/tag/v0.3.4"
+    }));
+  };
+  const service = new GitHubService({ runner });
+  const release = await service.getLatestRelease();
+  assert.equal(release.version, "0.3.4");
+  assert.equal(release.url, "https://github.com/gityuanbao/codex-skills-sync-app/releases/tag/v0.3.4");
+  assert.equal(trustedReleaseUrl("https://example.test/releases/v9"), RELEASE_PAGE_URL);
 });
 
 test("reuses an existing private repository", async () => {

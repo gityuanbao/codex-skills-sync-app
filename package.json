@@ -1,6 +1,6 @@
 {
   "name": "codex-skills-sync-app",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "面向 macOS 和 Windows 的 Codex Skills 中文自动同步桌面工具。",
   "author": {
     "name": "Git源宝 (Dorian)"

@@ -8,7 +8,11 @@ const state = {
   currentStep: 1,
   role: "source",
   busy: false,
-  dashboardReady: false
+  dashboardReady: false,
+  reconnectOnly: false,
+  githubNetwork: null,
+  deviceInfoTimer: null,
+  deviceCode: ""
 };
 
 const elements = Object.fromEntries([
@@ -21,15 +25,24 @@ const elements = Object.fromEntries([
   "detectedSkillsPath",
   "environmentError",
   "toGitHubButton",
+  "cancelOnboardingButton",
   "githubAccount",
   "githubAccountName",
   "githubAccountText",
   "githubError",
   "proxyStatus",
+  "githubNetworkStatus",
+  "githubNetworkDot",
+  "githubNetworkTitle",
+  "githubNetworkText",
+  "diagnoseGitHubSetupButton",
   "connectGitHubButton",
   "toRoleButton",
   "githubLoginHelp",
   "openGitHubDeviceButton",
+  "deviceCodePanel",
+  "deviceCodeText",
+  "copyDeviceCodeButton",
   "sourceRoleOption",
   "sourceRoleHelp",
   "toFinishButton",
@@ -73,6 +86,14 @@ const elements = Object.fromEntries([
   "openRepoButton",
   "openConflictsButton",
   "syncIntervalInput",
+  "appVersionLabel",
+  "updateStatus",
+  "diagnoseGitHubDashboardButton",
+  "reconnectGitHubButton",
+  "restartOnboardingButton",
+  "checkUpdateButton",
+  "openReleaseButton",
+  "maintenanceError",
   "commandLine",
   "clearLogButton",
   "logOutput"
@@ -90,6 +111,9 @@ function bindEvents() {
   elements.toGitHubButton.addEventListener("click", () => setStep(2));
   elements.connectGitHubButton.addEventListener("click", connectGitHub);
   elements.openGitHubDeviceButton.addEventListener("click", openGitHubDevice);
+  elements.copyDeviceCodeButton.addEventListener("click", copyDeviceCode);
+  elements.diagnoseGitHubSetupButton.addEventListener("click", () => diagnoseGitHub("setup"));
+  elements.cancelOnboardingButton.addEventListener("click", cancelOnboarding);
   elements.toRoleButton.addEventListener("click", () => setStep(3));
   elements.toFinishButton.addEventListener("click", () => setStep(4));
   elements.startSyncButton.addEventListener("click", startSimpleSetup);
@@ -124,6 +148,11 @@ function bindEvents() {
   elements.selectRepoButton.addEventListener("click", () => selectDirectory("repo", elements.repoInput));
   elements.selectSkillsButton.addEventListener("click", () => selectDirectory("skills", elements.skillsDirInput));
   elements.initButton.addEventListener("click", saveAdvancedConfiguration);
+  elements.diagnoseGitHubDashboardButton.addEventListener("click", () => diagnoseGitHub("dashboard"));
+  elements.reconnectGitHubButton.addEventListener("click", reconnectGitHub);
+  elements.restartOnboardingButton.addEventListener("click", restartOnboarding);
+  elements.checkUpdateButton.addEventListener("click", checkForUpdate);
+  elements.openReleaseButton.addEventListener("click", openReleasePage);
 
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => runAdvancedAction(button.dataset.action));
@@ -138,7 +167,7 @@ async function bootstrap() {
     }
     const result = await request("/api/desktop/onboarding");
     state.onboarding = result.data;
-    if (state.onboarding.configured) {
+    if (state.onboarding.configured && !state.onboarding.showOnboarding) {
       showDashboard();
       await refreshDashboard();
     } else {
@@ -158,6 +187,7 @@ function showOnboarding() {
   elements.loadingView.hidden = true;
   elements.dashboardView.hidden = true;
   elements.onboardingView.hidden = false;
+  elements.cancelOnboardingButton.hidden = !state.onboarding?.configured || state.reconnectOnly;
   renderOnboarding();
   setStep(state.currentStep || 1);
 }
@@ -182,6 +212,7 @@ function renderOnboarding() {
   elements.proxyStatus.textContent = proxy.source === "local"
     ? "已自动使用本机网络代理"
     : "已自动使用系统网络代理";
+  renderGitHubNetwork();
 
   renderGitHubAccount();
   if (count < 1 && state.role === "source") state.role = "receiver";
@@ -207,7 +238,7 @@ function renderGitHubAccount() {
     elements.githubAccountText.textContent = github.login ? `@${github.login}` : "授权有效";
     elements.accountLabel.textContent = github.login ? `GitHub · @${github.login}` : "GitHub 已连接";
   }
-  showError(elements.githubError, github.available === false ? github.error : "");
+  showError(elements.githubError, connected ? "" : github.error || "");
 }
 
 function setStep(step) {
@@ -228,6 +259,7 @@ async function connectGitHub() {
   showError(elements.githubError, "");
   elements.githubLoginHelp.hidden = false;
   elements.connectGitHubButton.textContent = "等待 GitHub 授权...";
+  startDeviceInfoPolling();
   try {
     const result = await request("/api/desktop/github-login", {
       method: "POST",
@@ -236,11 +268,104 @@ async function connectGitHub() {
     state.onboarding.github = result.data;
     renderGitHubAccount();
     renderSetupSummary();
+    if (state.reconnectOnly) {
+      const completed = await request("/api/desktop/onboarding-finish", {
+        method: "POST",
+        body: "{}"
+      });
+      state.onboarding = completed.data;
+      state.reconnectOnly = false;
+      showDashboard();
+      await refreshDashboard({ quiet: true });
+    }
   } catch (error) {
     showError(elements.githubError, friendlyError(error.message));
   } finally {
+    stopDeviceInfoPolling();
     elements.githubLoginHelp.hidden = true;
+    elements.deviceCodePanel.hidden = true;
     elements.connectGitHubButton.textContent = "使用浏览器连接 GitHub";
+    setBusy(false);
+  }
+}
+
+function startDeviceInfoPolling() {
+  stopDeviceInfoPolling();
+  const poll = async () => {
+    try {
+      const result = await request("/api/desktop/github-device-info");
+      const info = result.data || {};
+      if (!info.active || !info.code) return;
+      state.deviceCode = info.code;
+      elements.deviceCodeText.textContent = info.code;
+      elements.deviceCodePanel.hidden = false;
+    } catch {
+      // Login remains usable even if this optional status poll fails.
+    }
+  };
+  poll();
+  state.deviceInfoTimer = setInterval(poll, 500);
+}
+
+function stopDeviceInfoPolling() {
+  if (state.deviceInfoTimer) clearInterval(state.deviceInfoTimer);
+  state.deviceInfoTimer = null;
+  state.deviceCode = "";
+}
+
+async function copyDeviceCode() {
+  if (!state.deviceCode) return;
+  try {
+    await navigator.clipboard.writeText(state.deviceCode);
+  } catch {
+    const input = document.createElement("textarea");
+    input.value = state.deviceCode;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
+  }
+  elements.copyDeviceCodeButton.textContent = "已复制";
+  setTimeout(() => {
+    elements.copyDeviceCodeButton.textContent = "复制授权码";
+  }, 1500);
+}
+
+function renderGitHubNetwork() {
+  const result = state.githubNetwork;
+  elements.githubNetworkStatus.className = "connection-check";
+  if (!result) {
+    elements.githubNetworkTitle.textContent = "尚未检测 GitHub 连接";
+    elements.githubNetworkText.textContent = "登录遇到问题时，可以先检查网络和代理。";
+    return;
+  }
+  elements.githubNetworkStatus.classList.add(result.online ? "online" : "offline");
+  elements.githubNetworkTitle.textContent = result.online ? "GitHub 连接正常" : "GitHub 连接失败";
+  const route = result.viaProxy
+    ? result.proxySource === "local" ? "，已使用本机代理" : "，已使用系统代理"
+    : "，使用当前网络直连";
+  elements.githubNetworkText.textContent = result.online
+    ? `响应约 ${Number(result.latencyMs || 0)} 毫秒${route}`
+    : result.message || "请检查网络或代理设置。";
+}
+
+async function diagnoseGitHub(origin) {
+  const button = origin === "setup" ? elements.diagnoseGitHubSetupButton : elements.diagnoseGitHubDashboardButton;
+  setBusy(true);
+  button.textContent = "正在检测...";
+  showError(elements.maintenanceError, "");
+  try {
+    const response = await request("/api/desktop/github-diagnose", { method: "POST", body: "{}" });
+    state.githubNetwork = response.data;
+    renderGitHubNetwork();
+    elements.updateStatus.textContent = response.data.online ? "GitHub 连接正常" : "GitHub 连接失败";
+    if (!response.data.online && origin !== "setup") {
+      showError(elements.maintenanceError, response.data.message);
+    }
+  } catch (error) {
+    showError(origin === "setup" ? elements.githubError : elements.maintenanceError, friendlyError(error.message));
+  } finally {
+    button.textContent = "检测 GitHub 连接";
     setBusy(false);
   }
 }
@@ -292,6 +417,57 @@ async function startSimpleSetup() {
   } finally {
     elements.setupProgressText.hidden = true;
     elements.startSyncButton.textContent = "开始同步";
+    setBusy(false);
+  }
+}
+
+async function restartOnboarding() {
+  const confirmed = window.confirm("将重新显示四步设置。不会删除技能、私人仓库或历史版本。是否继续？");
+  if (!confirmed) return;
+  setBusy(true);
+  showError(elements.maintenanceError, "");
+  try {
+    const result = await request("/api/desktop/onboarding-start", { method: "POST", body: "{}" });
+    state.onboarding = result.data;
+    state.reconnectOnly = false;
+    state.currentStep = 1;
+    showOnboarding();
+  } catch (error) {
+    showError(elements.maintenanceError, friendlyError(error.message));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelOnboarding() {
+  setBusy(true);
+  try {
+    const result = await request("/api/desktop/onboarding-finish", { method: "POST", body: "{}" });
+    state.onboarding = result.data;
+    state.reconnectOnly = false;
+    showDashboard();
+    await refreshDashboard({ quiet: true });
+  } catch (error) {
+    showError(elements.environmentError, friendlyError(error.message));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function reconnectGitHub() {
+  const confirmed = window.confirm("这会清除本机保存的 GitHub 授权并立即进入重新连接。不会删除远程仓库，也不会影响其他电脑。是否继续？");
+  if (!confirmed) return;
+  setBusy(true);
+  showError(elements.maintenanceError, "");
+  try {
+    const result = await request("/api/desktop/github-reconnect", { method: "POST", body: "{}" });
+    state.onboarding = result.data;
+    state.reconnectOnly = true;
+    state.currentStep = 2;
+    showOnboarding();
+  } catch (error) {
+    showError(elements.maintenanceError, friendlyError(error.message));
+  } finally {
     setBusy(false);
   }
 }
@@ -397,7 +573,37 @@ function renderSettings() {
   elements.syncIntervalInput.value = Number(settings.syncIntervalSeconds || 30);
   elements.autoSyncState.textContent = settings.autoSync ? (service.paused ? "已暂停" : "已开启") : "已关闭";
   elements.autoSyncState.className = `state-pill ${settings.autoSync && !service.paused ? "ok" : "warn"}`;
+  const version = desktop.app && desktop.app.version || "未知";
+  elements.appVersionLabel.textContent = `当前版本 v${version}`;
   showError(elements.desktopError, service.lastError || "");
+}
+
+async function checkForUpdate() {
+  setBusy(true);
+  showError(elements.maintenanceError, "");
+  elements.checkUpdateButton.textContent = "正在检查...";
+  elements.updateStatus.textContent = "正在连接 GitHub";
+  try {
+    const response = await request("/api/desktop/check-update", { method: "POST", body: "{}" });
+    const result = response.data;
+    elements.updateStatus.textContent = result.updateAvailable
+      ? `发现新版本 v${result.latestVersion}`
+      : `已经是最新版 v${result.currentVersion}`;
+  } catch (error) {
+    elements.updateStatus.textContent = "检查更新失败";
+    showError(elements.maintenanceError, friendlyError(error.message));
+  } finally {
+    elements.checkUpdateButton.textContent = "检查新版本";
+    setBusy(false);
+  }
+}
+
+async function openReleasePage() {
+  try {
+    await request("/api/desktop/open-release", { method: "POST", body: "{}" });
+  } catch (error) {
+    showError(elements.maintenanceError, friendlyError(error.message));
+  }
 }
 
 function renderAdvancedValues() {

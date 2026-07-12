@@ -263,6 +263,10 @@ async function routeDesktop(request, response, url, desktopBridge) {
     sendJson(response, 200, { ok: true, data: await desktopBridge.getOnboardingStatus() });
     return;
   }
+  if (request.method === "GET" && action === "github-device-info") {
+    sendJson(response, 200, { ok: true, data: await desktopBridge.getGitHubDeviceInfo() });
+    return;
+  }
 
   if (request.method !== "POST") {
     sendJson(response, 405, { ok: false, error: "不允许的请求方法。" });
@@ -286,6 +290,36 @@ async function routeDesktop(request, response, url, desktopBridge) {
   }
   if (action === "open-github-device") {
     const result = await desktopBridge.openGitHubDevice();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "github-diagnose") {
+    const result = await desktopBridge.diagnoseGitHub();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "github-reconnect") {
+    const result = await desktopBridge.reconnectGitHub();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "onboarding-start") {
+    const result = await desktopBridge.startOnboarding();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "onboarding-finish") {
+    const result = await desktopBridge.finishOnboarding();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "check-update") {
+    const result = await desktopBridge.checkForUpdate();
+    sendJson(response, 200, { ok: true, data: result });
+    return;
+  }
+  if (action === "open-release") {
+    const result = await desktopBridge.openReleasePage();
     sendJson(response, 200, { ok: true, data: result });
     return;
   }

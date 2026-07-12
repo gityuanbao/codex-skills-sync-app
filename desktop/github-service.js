@@ -6,6 +6,8 @@ const childProcess = require("child_process");
 
 const DEFAULT_REPOSITORY_NAME = "codex-skill-sync";
 const GITHUB_DEVICE_URL = "https://github.com/login/device";
+const SOURCE_REPOSITORY = "gityuanbao/codex-skills-sync-app";
+const RELEASE_PAGE_URL = `https://github.com/${SOURCE_REPOSITORY}/releases/latest`;
 
 class GitHubService {
   constructor(options = {}) {
@@ -14,9 +16,12 @@ class GitHubService {
     this.isPackaged = Boolean(options.isPackaged);
     this.platform = options.platform || process.platform;
     this.runner = options.runner || runProcess;
+    this.networkRunner = options.networkRunner || runProcess;
+    this.gitExecutable = options.gitExecutable || "git";
     this.prepareNetwork = options.prepareNetwork || (async () => null);
     this.openExternal = options.openExternal || (async () => null);
     this.pendingDeviceUrl = GITHUB_DEVICE_URL;
+    this.pendingDeviceCode = "";
   }
 
   async getStatus() {
@@ -42,6 +47,7 @@ class GitHubService {
       "github.com"
     ], { timeoutMs: 15000 });
     if (!authResult.ok) {
+      const networkError = githubNetworkError(authResult);
       return {
         available: true,
         authenticated: false,
@@ -49,7 +55,7 @@ class GitHubService {
         name: "",
         avatarUrl: "",
         version: firstLine(versionResult.stdout),
-        error: ""
+        error: networkError
       };
     }
 
@@ -76,6 +82,7 @@ class GitHubService {
     const existing = await this.getStatus();
     if (!existing.authenticated) {
       this.pendingDeviceUrl = GITHUB_DEVICE_URL;
+      this.pendingDeviceCode = "";
       let result;
       try {
         result = await this.runner(executable, [
@@ -90,6 +97,9 @@ class GitHubService {
         ], {
           timeoutMs: 15 * 60 * 1000,
           interactiveGitHubLogin: true,
+          onDeviceCode: (code) => {
+            this.pendingDeviceCode = code;
+          },
           openBrowser: async (url) => {
             this.pendingDeviceUrl = normalizeGitHubDeviceUrl(url);
             await this.openExternal(this.pendingDeviceUrl);
@@ -98,6 +108,7 @@ class GitHubService {
         });
       } finally {
         this.pendingDeviceUrl = GITHUB_DEVICE_URL;
+        this.pendingDeviceCode = "";
       }
       if (!result.ok) {
         throw new Error(cleanGitHubError(result) || "没有完成 GitHub 授权，请重试。");
@@ -115,6 +126,95 @@ class GitHubService {
   async openPendingDevicePage() {
     await this.openExternal(this.pendingDeviceUrl);
     return true;
+  }
+
+  getPendingDeviceInfo() {
+    return {
+      active: Boolean(this.pendingDeviceCode),
+      code: this.pendingDeviceCode,
+      url: this.pendingDeviceUrl
+    };
+  }
+
+  async logout() {
+    const executable = this.resolveExecutable();
+    const login = await this.getConfiguredLogin();
+    if (!login) return this.getStatus();
+
+    const result = await this.runner(executable, [
+      "auth",
+      "logout",
+      "--hostname",
+      "github.com",
+      "--user",
+      login
+    ], { timeoutMs: 30000 });
+    if (!result.ok) {
+      throw new Error(cleanGitHubError(result) || "无法退出这台电脑上的 GitHub 账号。");
+    }
+    this.pendingDeviceUrl = GITHUB_DEVICE_URL;
+    this.pendingDeviceCode = "";
+    return this.getStatus();
+  }
+
+  async getConfiguredLogin() {
+    const executable = this.resolveExecutable();
+    const result = await this.runner(executable, [
+      "auth",
+      "status",
+      "--hostname",
+      "github.com",
+      "--json",
+      "hosts"
+    ], { timeoutMs: 15000 });
+    const parsed = parseJson(result.stdout) || {};
+    const accounts = parsed.hosts && parsed.hosts["github.com"];
+    if (!Array.isArray(accounts)) return "";
+    const active = accounts.find((account) => account && account.active) || accounts[0] || {};
+    return String(active.login || "");
+  }
+
+  async diagnoseNetwork() {
+    const startedAt = Date.now();
+    const proxy = await this.prepareNetwork();
+    const result = await this.networkRunner(this.gitExecutable, [
+      "ls-remote",
+      "--exit-code",
+      "https://github.com/cli/cli.git",
+      "HEAD"
+    ], {
+      timeoutMs: 20000,
+      env: { GIT_TERMINAL_PROMPT: "0", LANG: "C", LC_ALL: "C" }
+    });
+    const latencyMs = Date.now() - startedAt;
+    return {
+      online: Boolean(result.ok),
+      latencyMs,
+      viaProxy: Boolean(proxy && proxy.url),
+      proxySource: proxy && proxy.source || "",
+      message: result.ok ? "GitHub 连接正常。" : githubNetworkError(result) || "无法连接 GitHub，请检查网络或代理后重试。"
+    };
+  }
+
+  async getLatestRelease() {
+    await this.prepareNetwork();
+    const executable = this.resolveExecutable();
+    const result = await this.runner(executable, [
+      "api",
+      `repos/${SOURCE_REPOSITORY}/releases/latest`
+    ], { timeoutMs: 20000 });
+    if (!result.ok) {
+      throw new Error(githubNetworkError(result) || cleanGitHubError(result) || "无法检查最新版本。");
+    }
+    const release = parseJson(result.stdout) || {};
+    const tagName = String(release.tag_name || "");
+    return {
+      version: tagName.replace(/^v/i, ""),
+      tagName,
+      name: String(release.name || tagName),
+      publishedAt: String(release.published_at || ""),
+      url: trustedReleaseUrl(release.html_url)
+    };
   }
 
   async configureGitCredentials() {
@@ -231,6 +331,32 @@ function cleanGitHubError(result) {
     .trim();
 }
 
+function githubNetworkError(result) {
+  const text = String(result && (result.stderr || result.stdout || result.error) || "")
+    .replace(/\x1b\[[0-9;]*m/g, "");
+  if (/timed? out|timeout|i\/o timeout/i.test(text)) {
+    return "连接 GitHub 超时，请确认网络或代理软件正在运行。";
+  }
+  if (/could not resolve host|no such host|name resolution/i.test(text)) {
+    return "无法解析 GitHub 地址，请检查 DNS 或网络设置。";
+  }
+  if (/connection refused|failed to connect|network is unreachable|connection reset/i.test(text)) {
+    return "无法连接 GitHub，请检查网络或代理设置。";
+  }
+  return "";
+}
+
+function trustedReleaseUrl(value) {
+  try {
+    const url = new URL(String(value || RELEASE_PAGE_URL));
+    if (url.protocol !== "https:" || url.hostname !== "github.com") return RELEASE_PAGE_URL;
+    if (!url.pathname.startsWith(`/${SOURCE_REPOSITORY}/releases/`)) return RELEASE_PAGE_URL;
+    return url.toString();
+  } catch {
+    return RELEASE_PAGE_URL;
+  }
+}
+
 function normalizeGitHubDeviceUrl(value) {
   const url = parseGitHubDeviceUrl(value);
   return url ? url.toString() : GITHUB_DEVICE_URL;
@@ -278,6 +404,7 @@ function runProcess(command, args, options = {}) {
     let confirmedBrowserOpen = false;
     let openedBrowserUrl = false;
     let deviceUserCode = "";
+    let reportedDeviceCode = "";
     const child = childProcess.spawn(command, args, {
       env: { ...process.env, ...(options.env || {}) },
       stdio: [options.interactiveGitHubLogin ? "pipe" : "ignore", "pipe", "pipe"],
@@ -326,9 +453,15 @@ function runProcess(command, args, options = {}) {
         confirmedBrowserOpen = true;
         child.stdin.write("\n");
       }
-      const codeMatch = /One-time code\s+\(([A-Z0-9]{4}-[A-Z0-9]{4})\)\s+copied to clipboard/i.exec(normalizedPrompt);
-      if (codeMatch) deviceUserCode = codeMatch[1].toUpperCase();
-      const urlMatch = /Open this URL to continue in your web browser:\s*(https:\/\/github\.com\/login\/device)\b/i.exec(normalizedPrompt);
+      const codeMatch = /(?:copy your\s+)?one-time code(?:\s*\(|\s*:\s*|\s+)([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(normalizedPrompt);
+      if (codeMatch) {
+        deviceUserCode = codeMatch[1].toUpperCase();
+        if (reportedDeviceCode !== deviceUserCode) {
+          reportedDeviceCode = deviceUserCode;
+          Promise.resolve(options.onDeviceCode && options.onDeviceCode(deviceUserCode)).catch(() => {});
+        }
+      }
+      const urlMatch = /(https:\/\/github\.com\/login\/device)\b/i.exec(normalizedPrompt);
       if (!openedBrowserUrl && urlMatch) {
         openedBrowserUrl = true;
         const deviceUrl = withGitHubDeviceCode(urlMatch[1], deviceUserCode);
@@ -341,9 +474,13 @@ function runProcess(command, args, options = {}) {
 module.exports = {
   DEFAULT_REPOSITORY_NAME,
   GITHUB_DEVICE_URL,
+  RELEASE_PAGE_URL,
+  SOURCE_REPOSITORY,
   GitHubService,
   cleanGitHubError,
+  githubNetworkError,
   runProcess,
   sanitizeRepositoryName,
+  trustedReleaseUrl,
   withGitHubDeviceCode
 };

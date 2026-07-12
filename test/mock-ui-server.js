@@ -8,6 +8,9 @@ const { startServer } = require("../bin/skill-sync-ui");
 
 const scenario = process.argv[2] || "onboarding";
 const port = Number(process.argv[3] || 17322);
+let showOnboarding = false;
+let authenticated = scenario === "dashboard";
+let deviceLoginActive = false;
 
 if (scenario === "dashboard") prepareDashboardFixture();
 
@@ -17,7 +20,8 @@ const desktopState = {
     syncOnStart: true,
     syncIntervalSeconds: 30,
     launchAtLogin: true,
-    closeToTray: true
+    closeToTray: true,
+    showOnboarding: false
   },
   state: {
     configured: scenario === "dashboard",
@@ -28,8 +32,12 @@ const desktopState = {
     lastError: ""
   },
   app: {
+    name: "Codex 技能同步器",
+    version: "0.3.4",
+    platform: "darwin",
     launchAtLogin: true,
-    canLaunchAtLogin: true
+    canLaunchAtLogin: true,
+    releasePageUrl: "https://github.com/gityuanbao/codex-skills-sync-app/releases/latest"
   }
 };
 
@@ -37,18 +45,57 @@ const bridge = {
   getStatus: async () => desktopState,
   getOnboardingStatus: async () => ({
     configured: scenario === "dashboard",
+    showOnboarding,
     skillsDir: process.env.SKILL_SYNC_SKILLS_DIR || "/Users/test/.codex/skills",
     localSkillCount: scenario === "dashboard" ? 3 : 8,
     gitAvailable: true,
     github: {
       available: true,
-      authenticated: scenario === "dashboard",
-      login: scenario === "dashboard" ? "octocat" : "",
-      name: scenario === "dashboard" ? "Octocat" : "",
+      authenticated,
+      login: authenticated ? "octocat" : "",
+      name: authenticated ? "Octocat" : "",
       error: ""
     }
   }),
-  connectGitHub: async () => ({ available: true, authenticated: true, login: "octocat", name: "Octocat" }),
+  connectGitHub: async () => {
+    deviceLoginActive = true;
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    deviceLoginActive = false;
+    authenticated = true;
+    return { available: true, authenticated: true, login: "octocat", name: "Octocat" };
+  },
+  getGitHubDeviceInfo: async () => ({
+    active: deviceLoginActive,
+    code: deviceLoginActive ? "ABCD-EFGH" : "",
+    url: "https://github.com/login/device?user_code=ABCD-EFGH"
+  }),
+  openGitHubDevice: async () => ({ opened: true }),
+  diagnoseGitHub: async () => ({
+    online: true,
+    latencyMs: 186,
+    viaProxy: true,
+    proxySource: "local",
+    message: "GitHub 连接正常。"
+  }),
+  reconnectGitHub: async () => {
+    authenticated = false;
+    showOnboarding = true;
+    return bridge.getOnboardingStatus();
+  },
+  startOnboarding: async () => {
+    showOnboarding = true;
+    return bridge.getOnboardingStatus();
+  },
+  finishOnboarding: async () => {
+    showOnboarding = false;
+    return bridge.getOnboardingStatus();
+  },
+  checkForUpdate: async () => ({
+    currentVersion: "0.3.4",
+    latestVersion: "0.3.4",
+    updateAvailable: false
+  }),
+  openReleasePage: async () => ({ opened: true }),
   simpleSetup: async () => ({ ok: true }),
   updateSettings: async (patch) => {
     Object.assign(desktopState.settings, patch);

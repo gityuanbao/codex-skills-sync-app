@@ -210,6 +210,12 @@ p {
   font-weight: 600;
 }
 
+.setup-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .setup-layout {
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr);
@@ -421,6 +427,45 @@ p {
   font-weight: 600;
 }
 
+.connection-check {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 13px 0;
+}
+
+.connection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #aebbb7;
+}
+
+.connection-check.online .connection-dot {
+  background: var(--green);
+}
+
+.connection-check.offline .connection-dot {
+  background: var(--red);
+}
+
+.connection-check strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.connection-check p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .account-result {
   margin-top: 18px;
 }
@@ -485,6 +530,30 @@ p {
 
 .login-help .action-hint {
   margin: 0;
+}
+
+.device-code-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid #b9cbed;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  padding: 12px 14px;
+}
+
+.device-code-panel > span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.device-code-panel code {
+  color: #1e3a8a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .inline-error {
@@ -964,6 +1033,41 @@ p {
   font-size: 14px;
 }
 
+.app-tools {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.app-tools-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.app-tools-heading h3 {
+  margin-bottom: 6px;
+}
+
+.app-tools-heading p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.app-tools-heading p strong {
+  color: #43534e;
+}
+
+.app-tool-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -1116,6 +1220,23 @@ pre {
   .preference-list,
   .advanced-content {
     grid-template-columns: 1fr;
+  }
+
+  .connection-check {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+
+  .connection-check .button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .device-code-panel {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .device-code-panel > span {
+    grid-column: 1 / -1;
   }
 
   .dashboard-main {

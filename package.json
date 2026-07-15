@@ -1,7 +1,7 @@
 {
   "name": "codex-skills-sync-app",
-  "version": "0.3.4",
-  "description": "面向 macOS 和 Windows 的 Codex Skills 中文自动同步桌面工具。",
+  "version": "0.4.0",
+  "description": "面向 macOS 和 Windows 的多客户端 Agent Skills 中文自动同步桌面工具。",
   "author": {
     "name": "Git源宝 (Dorian)"
   },
@@ -36,8 +36,8 @@
   },
   "build": {
     "appId": "com.codexskillsync.desktop",
-    "productName": "Codex 技能同步器",
-    "artifactName": "Codex-Skill-Sync-${version}-${os}-${arch}.${ext}",
+    "productName": "Agent Skills 同步器",
+    "artifactName": "Agent-Skills-Sync-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
     "afterPack": "desktop/after-pack.js",

@@ -262,7 +262,7 @@ class GitHubService {
         ownerAndName,
         "--private",
         "--description",
-        "由 Codex 技能同步器自动创建的私人技能仓库"
+        "由 Agent Skills 同步器自动创建的私人技能仓库"
       ], { timeoutMs: 60000 });
       if (!created.ok) {
         if (/already exists|name already exists|已存在/i.test(`${created.stderr}\n${created.stdout}`)) {

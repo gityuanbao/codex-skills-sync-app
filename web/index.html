@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Codex 技能同步器</title>
+    <title>Agent Skills 同步器</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <div class="loading-view" id="loadingView">
       <div class="app-logo" aria-hidden="true"></div>
-      <p>正在检查这台电脑上的 Codex 技能...</p>
+      <p>正在检查这台电脑上的 Agent Skills...</p>
     </div>
 
     <div class="setup-shell" id="onboardingView" hidden>
@@ -17,7 +17,7 @@
         <div class="brand-lockup">
           <div class="app-logo" aria-hidden="true"></div>
           <div>
-            <strong>Codex 技能同步器</strong>
+            <strong>Agent Skills 同步器</strong>
             <span>第一次设置</span>
           </div>
         </div>
@@ -42,7 +42,7 @@
           <section class="setup-step active" data-step="1">
             <p class="step-kicker">第 1 步，共 4 步</p>
             <h1>先看看这台电脑</h1>
-            <p class="step-intro">软件会自动找到 Codex 使用的技能文件夹，你不需要选择路径。</p>
+            <p class="step-intro">软件会自动找到 Codex、Claude Code、WorkBuddy 和 MiniMax Code 的技能文件夹。</p>
 
             <div class="detection-result" id="skillDetection">
               <span class="result-icon" aria-hidden="true">✓</span>
@@ -53,7 +53,7 @@
             </div>
 
             <details class="plain-details">
-              <summary>查看识别到的位置</summary>
+              <summary>查看识别到的客户端目录</summary>
               <code id="detectedSkillsPath">正在检查</code>
             </details>
 
@@ -144,18 +144,18 @@
           <section class="setup-step" data-step="4">
             <p class="step-kicker">第 4 步，共 4 步</p>
             <h1>准备开始自动同步</h1>
-            <p class="step-intro">确认一次即可，以后打开 Codex 或修改技能时都会自动检查更新。</p>
+            <p class="step-intro">确认一次即可，以后任一客户端修改技能时都会自动检查并分发更新。</p>
 
             <div class="setup-summary">
               <div><span>GitHub</span><strong id="summaryAccount">未连接</strong></div>
               <div><span>本机技能</span><strong id="summarySkills">0 个</strong></div>
               <div><span>首次方式</span><strong id="summaryRole">使用本机版本</strong></div>
-              <div><span>云端位置</span><strong>自动创建私人仓库</strong></div>
+              <div><span>使用客户端</span><strong id="summaryTargets">4 个</strong></div>
             </div>
 
             <div class="preference-list">
               <label><input type="checkbox" id="setupLaunchAtLogin" checked><span><strong>开机后自动运行</strong><small>无需每次手动打开软件</small></span></label>
-              <label><input type="checkbox" id="setupInstallHook" checked><span><strong>打开 Codex 时检查一次</strong><small>确保开始工作前拿到最新技能</small></span></label>
+              <label><input type="checkbox" id="setupInstallHook" checked><span><strong>打开 Codex 时额外检查一次</strong><small>后台同步之外，再增加一次启动检查</small></span></label>
             </div>
 
             <p class="inline-error" id="setupError" hidden></p>
@@ -174,7 +174,7 @@
         <div class="brand-lockup">
           <div class="app-logo" aria-hidden="true"></div>
           <div>
-            <strong>Codex 技能同步器</strong>
+            <strong>Agent Skills 同步器</strong>
             <span id="accountLabel">自动保护你的技能</span>
           </div>
         </div>
@@ -209,7 +209,7 @@
                 <h2>我的技能</h2>
                 <p id="skillListSummary">正在读取技能...</p>
               </div>
-              <button class="button small" id="openSkillsButton">打开技能文件夹</button>
+              <button class="button small" id="openSkillsButton">打开主技能文件夹</button>
             </div>
             <div class="skill-list" id="skillsList">
               <p class="empty-state">暂无技能</p>
@@ -241,7 +241,7 @@
               <h3>同步位置</h3>
               <label class="field"><span>GitHub 仓库</span><input id="remoteInput" type="text" placeholder="https://github.com/用户名/codex-skill-sync.git"></label>
               <label class="field"><span>本地同步仓库</span><span class="input-with-action"><input id="repoInput" type="text"><button class="button small" id="selectRepoButton">选择</button></span></label>
-              <label class="field"><span>Codex 技能文件夹</span><span class="input-with-action"><input id="skillsDirInput" type="text"><button class="button small" id="selectSkillsButton">选择</button></span></label>
+              <div class="skill-targets-editor" id="skillTargetsEditor"></div>
               <label class="check-line"><input id="importExistingInput" type="checkbox"><span>把当前电脑的技能作为首次版本</span></label>
               <button class="button" id="initButton">保存高级配置</button>
             </section>
@@ -253,7 +253,7 @@
                 <button class="button" data-action="pull">只获取更新</button>
                 <button class="button" data-action="import">重新读取本机技能</button>
                 <button class="button" data-action="publish">立即上传本机版本</button>
-                <button class="button" id="installHookButton">重新安装 Codex 启动同步</button>
+                <button class="button" id="installHookButton">安装 Codex 启动检查</button>
                 <button class="button" id="openRepoButton">打开同步仓库</button>
                 <button class="button" id="openConflictsButton">打开冲突备份</button>
               </div>

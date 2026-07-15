@@ -32,8 +32,8 @@ const desktopState = {
     lastError: ""
   },
   app: {
-    name: "Codex 技能同步器",
-    version: "0.3.4",
+    name: "Agent Skills 同步器",
+    version: "0.4.0",
     platform: "darwin",
     launchAtLogin: true,
     canLaunchAtLogin: true,
@@ -46,7 +46,12 @@ const bridge = {
   getOnboardingStatus: async () => ({
     configured: scenario === "dashboard",
     showOnboarding,
-    skillsDir: process.env.SKILL_SYNC_SKILLS_DIR || "/Users/test/.codex/skills",
+    skillsDir: process.env.SKILL_SYNC_SKILLS_DIR || "/Users/test/.agents/skills",
+    skillTargets: [
+      { id: "agents", label: "Codex + MiniMax Code", path: "/Users/test/.agents/skills", clients: ["codex", "minimax-code"], skillCount: 3 },
+      { id: "claude-code", label: "Claude Code", path: "/Users/test/.claude/skills", clients: ["claude-code"], skillCount: 3 },
+      { id: "workbuddy", label: "WorkBuddy", path: "/Users/test/.workbuddy/skills", clients: ["workbuddy"], skillCount: 3 }
+    ],
     localSkillCount: scenario === "dashboard" ? 3 : 8,
     gitAvailable: true,
     github: {
@@ -91,8 +96,8 @@ const bridge = {
     return bridge.getOnboardingStatus();
   },
   checkForUpdate: async () => ({
-    currentVersion: "0.3.4",
-    latestVersion: "0.3.4",
+    currentVersion: "0.4.0",
+    latestVersion: "0.4.0",
     updateAvailable: false
   }),
   openReleasePage: async () => ({ opened: true }),
@@ -113,7 +118,12 @@ function prepareDashboardFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "skill-sync-dashboard-"));
   const config = path.join(root, "config.json");
   const repo = path.join(root, "repo");
-  const skills = path.join(root, "skills");
+  const targets = [
+    { id: "agents", label: "Codex + MiniMax Code", path: path.join(root, ".agents", "skills"), clients: ["codex", "minimax-code"] },
+    { id: "claude-code", label: "Claude Code", path: path.join(root, ".claude", "skills"), clients: ["claude-code"] },
+    { id: "workbuddy", label: "WorkBuddy", path: path.join(root, ".workbuddy", "skills"), clients: ["workbuddy"] }
+  ];
+  const skills = targets[0].path;
   for (const name of ["research-helper", "video-writer", "meeting-notes"]) {
     const directory = path.join(skills, name);
     fs.mkdirSync(directory, { recursive: true });
@@ -121,15 +131,15 @@ function prepareDashboardFixture() {
   }
   process.env.SKILL_SYNC_CONFIG = config;
   process.env.SKILL_SYNC_REPO = repo;
-  process.env.SKILL_SYNC_SKILLS_DIR = skills;
+  process.env.SKILL_SYNC_TARGETS_JSON = JSON.stringify(targets);
   const cli = path.join(__dirname, "..", "bin", "skill-sync.js");
   const result = childProcess.spawnSync(process.execPath, [
     cli,
     "init",
     "--repo",
     repo,
-    "--skills-dir",
-    skills,
+    "--targets-json",
+    JSON.stringify(targets),
     "--import-existing"
   ], { encoding: "utf8" });
   if (result.status !== 0) {

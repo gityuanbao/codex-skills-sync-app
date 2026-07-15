@@ -30,6 +30,7 @@ class SyncService {
       running: false,
       paused: false,
       watchedDirectory: "",
+      watchedDirectories: [],
       lastTrigger: "",
       lastStartedAt: "",
       lastSuccessAt: "",
@@ -44,7 +45,7 @@ class SyncService {
     this.debounceTimer = null;
     this.startupTimer = null;
     this.queuedTimer = null;
-    this.watcher = null;
+    this.watchers = new Map();
   }
 
   async start() {
@@ -69,7 +70,7 @@ class SyncService {
     if (this.queuedTimer) clearTimeout(this.queuedTimer);
     this.startupTimer = null;
     this.queuedTimer = null;
-    this.closeWatcher();
+    this.closeWatchers();
   }
 
   getStatus() {
@@ -179,7 +180,7 @@ class SyncService {
 
   recordError(message) {
     const text = String(message || "同步失败。").trim();
-    const needsAttention = /自动合并失败|首次同步发现|未处理的改动|冲突/.test(text);
+    const needsAttention = /自动合并失败|首次同步发现|多个客户端中存在|未处理的改动|冲突/.test(text);
     const needsSetup = /没有找到配置文件|请先运行 skill-sync init|同步仓库不存在/.test(text);
     this.state.lastError = text;
     this.state.lastErrorAt = new Date().toISOString();
@@ -194,7 +195,8 @@ class SyncService {
       this.state.configured = false;
       if (!this.state.running) this.state.phase = "setup";
       this.state.watchedDirectory = "";
-      this.closeWatcher();
+      this.state.watchedDirectories = [];
+      this.closeWatchers();
       this.emitState();
       return false;
     }
@@ -203,42 +205,46 @@ class SyncService {
     if (!this.state.running && !this.state.paused && this.state.phase === "setup") {
       this.state.phase = "idle";
     }
-    this.watchDirectory(result.data.skillsDir || "");
+    this.watchDirectories(result.data.skillsDirs || [result.data.skillsDir].filter(Boolean));
     this.emitState();
     return true;
   }
 
-  watchDirectory(directory) {
-    if (!directory || !fs.existsSync(directory)) {
-      this.closeWatcher();
-      this.state.watchedDirectory = "";
-      return;
+  watchDirectories(directories) {
+    const desired = Array.from(new Set((directories || []).filter((directory) => directory && fs.existsSync(directory))));
+    for (const [directory, watcher] of this.watchers) {
+      if (desired.includes(directory)) continue;
+      watcher.close();
+      this.watchers.delete(directory);
     }
-    if (this.watcher && this.state.watchedDirectory === directory) return;
 
-    this.closeWatcher();
-    try {
-      this.watcher = fs.watch(directory, { recursive: true }, (_event, filename) => {
-        if (!this.settings.autoSync || this.state.paused) return;
-        const value = String(filename || "");
-        if (/(^|[/\\])(\.DS_Store|\.git)([/\\]|$)/.test(value)) return;
-        this.clearDebounce();
-        this.debounceTimer = setTimeout(() => {
-          this.syncNow("file-change").catch(() => {});
-        }, 2500);
-      });
-      this.watcher.on("error", (error) => {
-        this.state.lastError = `技能目录监听失败：${error.message}`;
+    for (const directory of desired) {
+      if (this.watchers.has(directory)) continue;
+      try {
+        const watcher = fs.watch(directory, { recursive: true }, (_event, filename) => {
+          if (!this.settings.autoSync || this.state.paused) return;
+          const value = String(filename || "");
+          if (/(^|[/\\])(\.DS_Store|\.git)([/\\]|$)/.test(value)) return;
+          this.clearDebounce();
+          this.debounceTimer = setTimeout(() => {
+            this.syncNow("file-change").catch(() => {});
+          }, 2500);
+        });
+        watcher.on("error", (error) => {
+          this.state.lastError = `技能目录监听失败（${directory}）：${error.message}`;
+          this.state.phase = "error";
+          watcher.close();
+          this.watchers.delete(directory);
+          this.updateWatchedDirectoryState();
+          this.emitState();
+        });
+        this.watchers.set(directory, watcher);
+      } catch (error) {
+        this.state.lastError = `技能目录监听失败（${directory}）：${error.message}`;
         this.state.phase = "error";
-        this.closeWatcher();
-        this.emitState();
-      });
-      this.state.watchedDirectory = directory;
-    } catch (error) {
-      this.state.lastError = `技能目录监听失败：${error.message}`;
-      this.state.phase = "error";
-      this.state.watchedDirectory = "";
+      }
     }
+    this.updateWatchedDirectoryState();
   }
 
   configureInterval() {
@@ -265,9 +271,15 @@ class SyncService {
     this.debounceTimer = null;
   }
 
-  closeWatcher() {
-    if (this.watcher) this.watcher.close();
-    this.watcher = null;
+  updateWatchedDirectoryState() {
+    this.state.watchedDirectories = Array.from(this.watchers.keys());
+    this.state.watchedDirectory = this.state.watchedDirectories[0] || "";
+  }
+
+  closeWatchers() {
+    for (const watcher of this.watchers.values()) watcher.close();
+    this.watchers.clear();
+    this.updateWatchedDirectoryState();
   }
 
   loadSettings() {

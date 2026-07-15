@@ -36,6 +36,7 @@ const COMMANDS = {
       if (body.remote) args.push(String(body.remote));
       if (body.repo) args.push("--repo", String(body.repo));
       if (body.skillsDir) args.push("--skills-dir", String(body.skillsDir));
+      if (Array.isArray(body.skillTargets)) args.push("--targets-json", JSON.stringify(body.skillTargets));
       if (body.branch) args.push("--branch", String(body.branch));
       if (body.importExisting) args.push("--import-existing");
       args.push("--json");
@@ -122,7 +123,7 @@ function startServer(options = {}) {
       const actualPort = address && typeof address === "object" ? address.port : port;
       const url = `http://${host}:${actualPort}`;
       if (options.log) {
-        console.log(`Codex 技能同步器可视化控制台已启动：${url}`);
+        console.log(`Agent Skills 同步器可视化控制台已启动：${url}`);
       }
       resolve({ server, host, port: actualPort, url });
     });
@@ -163,7 +164,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Codex 技能同步器可视化控制台
+  console.log(`Agent Skills 同步器可视化控制台
 
 用法：
   skill-sync-ui [port]
@@ -175,6 +176,7 @@ function printHelp() {
   SKILL_SYNC_CONFIG     转发给 skill-sync 的配置文件。
   SKILL_SYNC_REPO       转发给 skill-sync 的同步仓库路径。
   SKILL_SYNC_SKILLS_DIR 转发给 skill-sync 的技能目录路径。
+  SKILL_SYNC_TARGETS_JSON 转发多个客户端技能目录。
 `);
 }
 
@@ -203,6 +205,7 @@ async function route(request, response, context = {}) {
         SKILL_SYNC_CONFIG: process.env.SKILL_SYNC_CONFIG || "",
         SKILL_SYNC_REPO: process.env.SKILL_SYNC_REPO || "",
         SKILL_SYNC_SKILLS_DIR: process.env.SKILL_SYNC_SKILLS_DIR || "",
+        SKILL_SYNC_TARGETS_JSON: process.env.SKILL_SYNC_TARGETS_JSON || "",
         CODEX_HOME: process.env.CODEX_HOME || ""
       }
     });

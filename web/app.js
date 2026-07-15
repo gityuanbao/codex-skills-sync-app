@@ -49,6 +49,7 @@ const elements = Object.fromEntries([
   "summaryAccount",
   "summarySkills",
   "summaryRole",
+  "summaryTargets",
   "setupLaunchAtLogin",
   "setupInstallHook",
   "setupError",
@@ -77,9 +78,8 @@ const elements = Object.fromEntries([
   "desktopError",
   "remoteInput",
   "repoInput",
-  "skillsDirInput",
+  "skillTargetsEditor",
   "selectRepoButton",
-  "selectSkillsButton",
   "importExistingInput",
   "initButton",
   "installHookButton",
@@ -146,7 +146,13 @@ function bindEvents() {
   elements.openConflictsButton.addEventListener("click", () => openPath("conflicts"));
   elements.installHookButton.addEventListener("click", installHook);
   elements.selectRepoButton.addEventListener("click", () => selectDirectory("repo", elements.repoInput));
-  elements.selectSkillsButton.addEventListener("click", () => selectDirectory("skills", elements.skillsDirInput));
+  elements.skillTargetsEditor.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-select-target]");
+    if (!button) return;
+    const row = button.closest("[data-target-id]");
+    const input = row && row.querySelector("[data-target-path]");
+    if (input) selectDirectory("skills", input);
+  });
   elements.initButton.addEventListener("click", saveAdvancedConfiguration);
   elements.diagnoseGitHubDashboardButton.addEventListener("click", () => diagnoseGitHub("dashboard"));
   elements.reconnectGitHubButton.addEventListener("click", reconnectGitHub);
@@ -195,8 +201,11 @@ function showOnboarding() {
 function renderOnboarding() {
   const onboarding = state.onboarding || {};
   const count = Number(onboarding.localSkillCount || 0);
-  elements.detectedSkillsPath.textContent = onboarding.skillsDir || "没有找到技能文件夹";
-  elements.detectedSkillTitle.textContent = count > 0 ? `发现 ${count} 个 Codex 技能` : "暂时没有发现本机技能";
+  const targets = onboarding.skillTargets || [];
+  elements.detectedSkillsPath.textContent = targets.length
+    ? targets.map((target) => `${target.label}  →  ${target.path}`).join("\n")
+    : onboarding.skillsDir || "没有找到技能文件夹";
+  elements.detectedSkillTitle.textContent = count > 0 ? `发现 ${count} 个 Agent Skills` : "暂时没有发现本机技能";
   elements.detectedSkillText.textContent = count > 0
     ? "这些技能可以作为第一份版本，也可以先与其他电脑合并。"
     : "如果技能保存在另一台电脑，后面选择从其他电脑获取即可。";
@@ -394,6 +403,8 @@ function renderSetupSummary() {
   elements.summaryAccount.textContent = github.login ? `@${github.login}` : "未连接";
   elements.summarySkills.textContent = `${Number(onboarding.localSkillCount || 0)} 个`;
   elements.summaryRole.textContent = state.role === "source" ? "使用这台电脑的版本" : "先从其他电脑获取";
+  const clients = new Set((onboarding.skillTargets || []).flatMap((target) => target.clients || []));
+  elements.summaryTargets.textContent = `${clients.size || (onboarding.skillTargets || []).length} 个`;
 }
 
 async function startSimpleSetup() {
@@ -610,7 +621,38 @@ function renderAdvancedValues() {
   const status = state.status || {};
   elements.remoteInput.value = status.remote || "";
   elements.repoInput.value = status.repoDir || "";
-  elements.skillsDirInput.value = status.skillsDir || "";
+  renderSkillTargetsEditor(status.skillTargets || []);
+}
+
+function renderSkillTargetsEditor(targets) {
+  if (!targets.length) {
+    elements.skillTargetsEditor.innerHTML = '<p class="empty-state">尚未识别客户端技能目录</p>';
+    return;
+  }
+  elements.skillTargetsEditor.innerHTML = targets.map((target) => `
+    <div class="skill-target-row" data-target-id="${escapeHtml(target.id)}" data-target-label="${escapeHtml(target.label)}" data-target-clients="${escapeHtml((target.clients || []).join(","))}">
+      <label class="target-toggle">
+        <span class="target-marker" aria-hidden="true">✓</span>
+        <span><strong>${escapeHtml(target.label)}</strong><small>${Number(target.skillCount || 0)} 个技能</small></span>
+      </label>
+      <span class="input-with-action">
+        <input data-target-path type="text" value="${escapeHtml(target.path)}">
+        <button class="button small" type="button" data-select-target>选择</button>
+      </span>
+    </div>
+  `).join("");
+}
+
+function readSkillTargetsEditor() {
+  return Array.from(elements.skillTargetsEditor.querySelectorAll("[data-target-id]"))
+    .map((row) => ({
+      id: row.dataset.targetId,
+      label: row.dataset.targetLabel,
+      clients: String(row.dataset.targetClients || "").split(",").filter(Boolean),
+      path: row.querySelector("[data-target-path]").value.trim(),
+      enabled: true
+    }))
+    .filter((target) => target.path);
 }
 
 async function runSync() {
@@ -648,7 +690,7 @@ async function saveAdvancedConfiguration() {
   await runRequestWithLog("保存配置", "/api/init", {
     remote: elements.remoteInput.value.trim(),
     repo: elements.repoInput.value.trim(),
-    skillsDir: elements.skillsDirInput.value.trim(),
+    skillTargets: readSkillTargetsEditor(),
     importExisting: elements.importExistingInput.checked
   });
   await refreshDashboard();
@@ -667,7 +709,7 @@ async function runAdvancedAction(action) {
   const bodies = {
     pull: {},
     import: { prune: true },
-    publish: { push: true, message: "从 Codex 技能同步器上传" }
+    publish: { push: true, message: "从 Agent Skills 同步器上传" }
   };
   await runRequestWithLog(action, `/api/${action}`, bodies[action] || {});
   await refreshDashboard();
@@ -690,9 +732,9 @@ async function runRequestWithLog(label, url, body) {
 async function installHook() {
   try {
     const result = await request("/api/desktop/install-hook", { method: "POST", body: "{}" });
-    logResult("安装 Codex 启动同步", result);
+    logResult("安装 Codex 启动检查", result);
   } catch (error) {
-    logResult("安装 Codex 启动同步", { ok: false, error: error.message });
+    logResult("安装 Codex 启动检查", { ok: false, error: error.message });
   }
 }
 

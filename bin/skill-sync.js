@@ -7,11 +7,12 @@ const os = require("os");
 const crypto = require("crypto");
 const childProcess = require("child_process");
 
-const VERSION = "0.2.0";
+const VERSION = "0.4.0";
 const DEFAULT_BRANCH = "main";
 const CONFIG_ENV = "SKILL_SYNC_CONFIG";
 const REPO_ENV = "SKILL_SYNC_REPO";
 const SKILLS_ENV = "SKILL_SYNC_SKILLS_DIR";
+const TARGETS_ENV = "SKILL_SYNC_TARGETS_JSON";
 const CODEX_HOME_ENV = "CODEX_HOME";
 
 function main() {
@@ -78,6 +79,11 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
+    if (["--help", "-h", "--version", "-v"].includes(token)) {
+      positionals.push(token);
+      continue;
+    }
+
     if (token === "--") {
       positionals.push(...argv.slice(index + 1));
       break;
@@ -130,10 +136,10 @@ function toCamel(value) {
 }
 
 function printHelp() {
-  console.log(`Codex 技能同步器 ${VERSION}
+  console.log(`Agent Skills 同步器 ${VERSION}
 
 用法：
-  skill-sync init [remote] [--repo PATH] [--skills-dir PATH] [--import-existing]
+  skill-sync init [remote] [--repo PATH] [--skills-dir PATH] [--targets-json JSON] [--import-existing]
   skill-sync import [--prune|--no-prune]
   skill-sync pull [--quiet] [--prune] [--force]
   skill-sync publish [--message TEXT] [--no-push] [--no-pull]
@@ -146,13 +152,15 @@ function printHelp() {
 
 同步范围：
   - 只同步包含 SKILL.md 的技能目录。
-  - 不同步登录态、token、缓存，也不会同步整个 ~/.codex。
+  - 支持 Codex、Claude Code、WorkBuddy 和 MiniMax Code 的用户级技能目录。
+  - 不同步登录态、token、缓存，也不会同步任何客户端的整个配置目录。
 
 常用环境变量：
-  ${CONFIG_ENV}       覆盖配置文件路径。
-  ${REPO_ENV}         覆盖同步仓库路径。
-  ${SKILLS_ENV}   覆盖 Codex 技能目录。
-  ${CODEX_HOME_ENV}              用于发现 ~/.codex/skills。
+  ${CONFIG_ENV}        覆盖配置文件路径。
+  ${REPO_ENV}          覆盖同步仓库路径。
+  ${SKILLS_ENV}        兼容旧版：只使用一个技能目录。
+  ${TARGETS_ENV}       使用 JSON 数组覆盖多个客户端技能目录。
+  ${CODEX_HOME_ENV}    用于发现自定义的 Codex 技能目录。
 `);
 }
 
@@ -199,6 +207,7 @@ function commandInit(parsed) {
   const nextConfig = {
     repoDir: settings.repoDir,
     skillsDir: settings.skillsDir,
+    skillTargets: settings.skillTargets,
     branch: gitCurrentBranch(settings.repoDir) || settings.branch,
     remote: remote || config.remote || gitRemoteUrl(settings.repoDir, "origin") || "",
     initialDirection: options.importExisting ? "local" : "remote"
@@ -206,20 +215,22 @@ function commandInit(parsed) {
   saveConfig(options, nextConfig);
 
   if (options.importExisting) {
-    mirrorSkills(settings.skillsDir, settings.repoSkillsDir, { prune: false });
+    const imported = mergeSkillTargetsToRepo(settings, { prune: false });
+    throwIfTargetConflicts(imported.conflicts);
   }
 
   printObjectOrText(options, {
     configPath: getConfigPath(options),
     repoDir: settings.repoDir,
     skillsDir: settings.skillsDir,
+    skillTargets: settings.skillTargets,
     remote: nextConfig.remote,
     imported: Boolean(options.importExisting)
   }, [
-    "Codex 技能同步器已初始化。",
+    "Agent Skills 同步器已初始化。",
     `配置文件：${getConfigPath(options)}`,
     `同步仓库：${settings.repoDir}`,
-    `Codex 技能目录：${settings.skillsDir}`,
+    `已启用 ${settings.skillTargets.length} 个客户端技能目录。`,
     options.importExisting ? "已将现有技能导入 repo/skills。" : "运行 skill-sync import 可将当前技能复制到同步仓库。"
   ]);
   });
@@ -229,9 +240,10 @@ function commandImport(parsed) {
   const settings = requireSettings(parsed.options);
   return withSyncLock(settings, () => {
   const prune = parsed.options.prune !== false;
-  const result = mirrorSkills(settings.skillsDir, settings.repoSkillsDir, { prune });
+  const result = mergeSkillTargetsToRepo(settings, { prune });
+  throwIfTargetConflicts(result.conflicts);
   printObjectOrText(parsed.options, result, [
-    `已导入 ${result.copied.length} 个技能到 ${settings.repoSkillsDir}。`,
+    `已汇总 ${result.copied.length} 个技能到 ${settings.repoSkillsDir}。`,
     result.removed.length ? `已移除 ${result.removed.length} 个本机不存在的仓库技能。` : "没有移除仓库技能。"
   ]);
   });
@@ -261,7 +273,7 @@ function commandPull(parsed) {
     pulled = true;
   }
 
-  const result = applyRepoSkills(settings, {
+  const result = applyRepoSkillsToTargets(settings, {
     prune: Boolean(options.prune),
     force: Boolean(options.force),
     quiet: Boolean(options.quiet)
@@ -270,7 +282,7 @@ function commandPull(parsed) {
   if (!options.quiet) {
     printObjectOrText(options, { pulled, ...result }, [
       pulled ? "已拉取最新同步仓库。" : "没有配置 origin 远程仓库，已跳过 git pull。",
-      `已应用 ${result.applied.length} 个技能。`,
+      `已向客户端目录应用 ${result.applied.length} 项技能变更。`,
       result.conflicts.length ? `发现 ${result.conflicts.length} 个冲突，本机技能未被覆盖。` : "没有冲突。"
     ]);
   }
@@ -291,20 +303,25 @@ function commandPublish(parsed) {
     }
   }
 
-  const mirrorResult = mirrorSkills(settings.skillsDir, settings.repoSkillsDir, {
+  const mirrorResult = mergeSkillTargetsToRepo(settings, {
     prune: options.prune !== false
   });
+  throwIfTargetConflicts(mirrorResult.conflicts);
 
   runGit(["add", ".gitignore", "skill-sync.json", "skills"], { cwd: settings.repoDir });
 
   const dirty = gitDirty(settings.repoDir);
   if (!dirty.length) {
-    printObjectOrText(options, { changed: false, mirror: mirrorResult }, ["没有需要发布的技能改动。"]);
+    const applyResult = applyRepoSkillsToTargets(settings, { prune: true, force: true });
+    printObjectOrText(options, { changed: false, mirror: mirrorResult, apply: applyResult }, [
+      "没有需要发布的技能改动。",
+      `已向客户端目录应用 ${applyResult.applied.length} 项技能变更。`
+    ]);
     return;
   }
 
   ensureGitIdentity(settings.repoDir);
-  const message = options.message || `从 ${os.hostname()} 同步 Codex 技能`;
+  const message = options.message || `从 ${os.hostname()} 同步 Agent Skills`;
   runGit(["commit", "-m", String(message)], { cwd: settings.repoDir });
 
   const hasRemote = Boolean(gitRemoteUrl(settings.repoDir, "origin"));
@@ -314,11 +331,12 @@ function commandPublish(parsed) {
     pushed = true;
   }
 
-  writeApplyState(settings, readRepoSkillHashes(settings.repoSkillsDir));
+  const applyResult = applyRepoSkillsToTargets(settings, { prune: true, force: true });
 
-  printObjectOrText(options, { changed: true, pushed, mirror: mirrorResult }, [
-    "已发布本机 Codex 技能。",
-    pushed ? "已推送到 origin。" : "改动已在本地提交，没有执行 push。"
+  printObjectOrText(options, { changed: true, pushed, mirror: mirrorResult, apply: applyResult }, [
+    "已发布本机 Agent Skills。",
+    pushed ? "已推送到 origin。" : "改动已在本地提交，没有执行 push。",
+    `已向客户端目录应用 ${applyResult.applied.length} 项技能变更。`
   ]);
   });
 }
@@ -338,19 +356,19 @@ function performSync(parsed, settings) {
   const remote = gitRemoteUrl(settings.repoDir, "origin");
   let pulled = false;
 
-  if (!hasApplyState(settings) && settings.initialDirection !== "local") {
+  if (!hasAnyApplyState(settings) && settings.initialDirection !== "local") {
     if (remote && !gitDirty(settings.repoDir).length && remoteBranchExists(settings.repoDir, branch)) {
       pullWithRebase(settings.repoDir, branch);
       pulled = true;
     }
 
-    const initialApply = applyRepoSkills(settings, {
+    const initialApply = applyRepoSkillsToTargets(settings, {
       prune: false,
       force: false,
       quiet: Boolean(options.quiet)
     });
     if (initialApply.conflicts.length) {
-      fs.rmSync(getStatePath(settings), { force: true });
+      clearApplyStates(settings);
       throw new Error([
         "首次同步发现本机与远程存在同名但内容不同的技能，未覆盖任何版本。",
         ...initialApply.conflicts.map((item) => `  ${item.name}: ${item.local} | ${item.incoming}`)
@@ -358,16 +376,17 @@ function performSync(parsed, settings) {
     }
   }
 
-  const mirrorResult = mirrorSkills(settings.skillsDir, settings.repoSkillsDir, {
+  const mirrorResult = mergeSkillTargetsToRepo(settings, {
     prune: options.prune !== false
   });
+  throwIfTargetConflicts(mirrorResult.conflicts);
 
   runGit(["add", ".gitignore", "skill-sync.json", "skills"], { cwd: settings.repoDir });
 
   let committed = false;
   if (gitHasStagedChanges(settings.repoDir)) {
     ensureGitIdentity(settings.repoDir);
-    const message = options.message || `从 ${os.hostname()} 自动同步 Codex 技能`;
+    const message = options.message || `从 ${os.hostname()} 自动同步 Agent Skills`;
     runGit(["commit", "-m", String(message)], { cwd: settings.repoDir });
     committed = true;
   }
@@ -399,7 +418,7 @@ function performSync(parsed, settings) {
     pushed = true;
   }
 
-  const applyResult = applyRepoSkills(settings, {
+  const applyResult = applyRepoSkillsToTargets(settings, {
     prune: true,
     force: true,
     quiet: Boolean(options.quiet)
@@ -427,24 +446,51 @@ function commandStatus(parsed) {
   const options = parsed.options;
   const settings = requireSettings(options);
   const repoSkills = listSkills(settings.repoSkillsDir);
-  const localSkills = listSkills(settings.skillsDir);
   const repoHashes = hashSkills(settings.repoSkillsDir, repoSkills);
-  const localHashes = hashSkills(settings.skillsDir, localSkills);
-  const allNames = Array.from(new Set([...Object.keys(repoHashes), ...Object.keys(localHashes)])).sort();
+  const targetStatuses = settings.skillTargets.map((target) => {
+    const names = listSkills(target.path);
+    return {
+      ...target,
+      exists: isDirectory(target.path),
+      skillCount: names.length,
+      hashes: hashSkills(target.path, names)
+    };
+  });
+  const allNames = Array.from(new Set([
+    ...Object.keys(repoHashes),
+    ...targetStatuses.flatMap((target) => Object.keys(target.hashes))
+  ])).sort();
   const skills = allNames.map((name) => {
     const inRepo = Object.prototype.hasOwnProperty.call(repoHashes, name);
-    const local = Object.prototype.hasOwnProperty.call(localHashes, name);
+    const localTargets = targetStatuses.filter((target) => Object.prototype.hasOwnProperty.call(target.hashes, name));
+    const local = localTargets.length > 0;
     let state = "same";
     if (inRepo && !local) state = "missing-local";
     if (!inRepo && local) state = "local-only";
-    if (inRepo && local && repoHashes[name] !== localHashes[name]) state = "different";
-    return { name, state };
+    if (inRepo && local) {
+      const everyTargetMatches = targetStatuses.every((target) => target.hashes[name] === repoHashes[name]);
+      if (!everyTargetMatches) state = "different";
+    }
+    return {
+      name,
+      state,
+      targets: targetStatuses.map((target) => ({
+        id: target.id,
+        state: !Object.prototype.hasOwnProperty.call(target.hashes, name)
+          ? "missing"
+          : !inRepo
+            ? "local-only"
+            : target.hashes[name] === repoHashes[name] ? "same" : "different"
+      }))
+    };
   });
 
   const result = {
     configPath: getConfigPath(options),
     repoDir: settings.repoDir,
     skillsDir: settings.skillsDir,
+    skillsDirs: settings.skillTargets.map((target) => target.path),
+    skillTargets: targetStatuses.map(({ hashes, ...target }) => target),
     remote: gitRemoteUrl(settings.repoDir, "origin") || "",
     gitDirty: fs.existsSync(path.join(settings.repoDir, ".git")) ? gitDirty(settings.repoDir) : [],
     skills
@@ -453,7 +499,7 @@ function commandStatus(parsed) {
   printObjectOrText(options, result, [
     `配置文件：${result.configPath}`,
     `同步仓库：${result.repoDir}`,
-    `Codex 技能目录：${result.skillsDir}`,
+    ...result.skillTargets.map((target) => `${target.label}：${target.path}（${target.skillCount} 个）`),
     result.remote ? `远程仓库：${result.remote}` : "远程仓库：无",
     result.gitDirty.length ? `同步仓库有 ${result.gitDirty.length} 项未提交改动。` : "同步仓库是干净的。",
     ...skills.map((skill) => `- ${skill.name}: ${localizeSkillState(skill.state)}`)
@@ -472,10 +518,12 @@ function commandDoctor(parsed) {
   checks.push(check("repoDir", fs.existsSync(settings.repoDir), settings.repoDir));
   checks.push(check("repoGit", fs.existsSync(path.join(settings.repoDir, ".git")), path.join(settings.repoDir, ".git")));
   checks.push(check("repoSkills", fs.existsSync(settings.repoSkillsDir), settings.repoSkillsDir));
-  checks.push(check("skillsDir", fs.existsSync(settings.skillsDir), settings.skillsDir));
-  checks.push(check("skillsMode", true, isSymlink(settings.skillsDir) ? "symlink" : "copy"));
+  for (const target of settings.skillTargets) {
+    checks.push(check(`target:${target.id}`, fs.existsSync(target.path), target.path));
+    checks.push(check(`targetMode:${target.id}`, true, isSymlink(target.path) ? "symlink" : "copy"));
+  }
 
-  const localCount = listSkills(settings.skillsDir).length;
+  const localCount = listLocalSkillNames(settings).length;
   const repoCount = listSkills(settings.repoSkillsDir).length;
   checks.push(check("localSkillCount", localCount > 0, String(localCount)));
   checks.push(check("repoSkillCount", repoCount > 0, String(repoCount)));
@@ -496,30 +544,29 @@ function commandLink(parsed) {
   const settings = requireSettings(options);
   return withSyncLock(settings, () => {
   ensureDir(settings.repoSkillsDir);
-  ensureDir(path.dirname(settings.skillsDir));
-
-  if (fs.existsSync(settings.skillsDir)) {
-    if (sameRealPath(settings.skillsDir, settings.repoSkillsDir)) {
-      printObjectOrText(options, { linked: true, changed: false }, ["技能目录已经指向同步仓库的 skills 目录。"]);
-      return;
+  const linked = [];
+  const backups = [];
+  for (const target of settings.skillTargets) {
+    ensureDir(path.dirname(target.path));
+    if (fs.existsSync(target.path)) {
+      if (sameRealPath(target.path, settings.repoSkillsDir)) {
+        linked.push({ id: target.id, path: target.path, changed: false });
+        continue;
+      }
+      if (!options.backupExisting) {
+        throw new Error(`技能目录已经存在：${target.path}。请先导入当前技能，再使用 --backup-existing。`);
+      }
+      const backupPath = `${target.path}.backup-${timestamp()}`;
+      fs.renameSync(target.path, backupPath);
+      backups.push({ id: target.id, path: backupPath });
     }
-
-    if (!options.backupExisting) {
-      throw new Error(`技能目录已经存在：${settings.skillsDir}。请先导入当前技能，再使用 --backup-existing。`);
-    }
-
-    const backupPath = `${settings.skillsDir}.backup-${timestamp()}`;
-    fs.renameSync(settings.skillsDir, backupPath);
-    createSkillSymlink(settings.repoSkillsDir, settings.skillsDir);
-    printObjectOrText(options, { linked: true, backupPath }, [
-      `已将现有技能移动到备份目录：${backupPath}。`,
-      `已链接 ${settings.skillsDir} -> ${settings.repoSkillsDir}。`
-    ]);
-    return;
+    createSkillSymlink(settings.repoSkillsDir, target.path);
+    linked.push({ id: target.id, path: target.path, changed: true });
   }
-
-  createSkillSymlink(settings.repoSkillsDir, settings.skillsDir);
-  printObjectOrText(options, { linked: true }, [`已链接 ${settings.skillsDir} -> ${settings.repoSkillsDir}。`]);
+  printObjectOrText(options, { linked, backups }, [
+    `已将 ${linked.length} 个客户端技能目录链接到同步仓库。`,
+    ...backups.map((item) => `已备份：${item.path}`)
+  ]);
   });
 }
 
@@ -572,32 +619,145 @@ function requireSettings(options) {
 function resolveSettings(options, config, behavior = {}) {
   const home = os.homedir();
   const repoDir = expandPath(String(options.repo || process.env[REPO_ENV] || config.repoDir || path.join(home, ".codex-skill-sync", "repo")));
-  const skillsDir = expandPath(String(options.skillsDir || process.env[SKILLS_ENV] || config.skillsDir || discoverSkillsDir(home)));
+  const skillTargets = resolveSkillTargets(options, config, home);
+  if (!skillTargets.length) {
+    throw new Error("至少需要启用一个客户端技能目录。");
+  }
+  const skillsDir = skillTargets[0].path;
   const branch = String(options.branch || config.branch || DEFAULT_BRANCH);
   return {
     configPath: getConfigPath(options),
     repoDir,
     repoSkillsDir: path.join(repoDir, "skills"),
     skillsDir,
+    skillTargets,
     branch,
     initialDirection: String(config.initialDirection || ""),
     allowMissingConfig: Boolean(behavior.allowMissingConfig)
   };
 }
 
-function discoverSkillsDir(home) {
-  const codexHome = process.env[CODEX_HOME_ENV] ? expandPath(process.env[CODEX_HOME_ENV]) : path.join(home, ".codex");
-  const candidates = [
-    path.join(home, ".agents", "skills"),
-    path.join(codexHome, "skills"),
-    path.join(home, ".codex", "skills")
+function resolveSkillTargets(options, config, home) {
+  const explicitTargets = options.targetsJson || process.env[TARGETS_ENV];
+  if (explicitTargets) {
+    let parsed;
+    try {
+      parsed = typeof explicitTargets === "string" ? JSON.parse(explicitTargets) : explicitTargets;
+    } catch (error) {
+      throw new Error(`客户端目录 JSON 无效：${error.message}`);
+    }
+    return normalizeSkillTargets(parsed, home);
+  }
+
+  if (Array.isArray(config.skillTargets)) {
+    return normalizeSkillTargets(config.skillTargets, home);
+  }
+
+  const explicitSingle = options.skillsDir || process.env[SKILLS_ENV];
+  if (explicitSingle) {
+    return normalizeSkillTargets([customTarget(expandPath(String(explicitSingle)), "主要技能目录")], home);
+  }
+
+  const defaults = defaultSkillTargets(home);
+  if (!config.skillsDir) return defaults;
+
+  const legacyPath = expandPath(String(config.skillsDir));
+  return normalizeSkillTargets([
+    customTarget(legacyPath, labelForKnownTarget(legacyPath, home) || "旧版技能目录"),
+    ...defaults
+  ], home);
+}
+
+function defaultSkillTargets(home) {
+  const targets = [
+    {
+      id: "agents",
+      label: "Codex + MiniMax Code",
+      path: path.join(home, ".agents", "skills"),
+      clients: ["codex", "minimax-code"],
+      enabled: true
+    },
+    {
+      id: "claude-code",
+      label: "Claude Code",
+      path: path.join(home, ".claude", "skills"),
+      clients: ["claude-code"],
+      enabled: true
+    },
+    {
+      id: "workbuddy",
+      label: "WorkBuddy",
+      path: path.join(home, ".workbuddy", "skills"),
+      clients: ["workbuddy"],
+      enabled: true
+    }
   ];
+  if (process.env[CODEX_HOME_ENV]) {
+    targets.splice(1, 0, {
+      id: "codex-home",
+      label: "Codex（CODEX_HOME）",
+      path: path.join(expandPath(process.env[CODEX_HOME_ENV]), "skills"),
+      clients: ["codex"],
+      enabled: true
+    });
+  }
+  return normalizeSkillTargets(targets, home);
+}
 
-  const existingWithSkills = candidates.find((candidate) => listSkills(candidate).length > 0);
-  if (existingWithSkills) return existingWithSkills;
+function normalizeSkillTargets(value, home) {
+  if (!Array.isArray(value)) throw new Error("客户端技能目录必须是数组。");
+  const targets = [];
+  const seenPaths = new Set();
+  const seenIds = new Set();
 
-  const existing = candidates.find((candidate) => fs.existsSync(candidate));
-  return existing || candidates[0];
+  for (let index = 0; index < value.length; index += 1) {
+    const item = typeof value[index] === "string" ? { path: value[index] } : value[index];
+    if (!item || item.enabled === false || !item.path) continue;
+    const targetPath = expandPath(String(item.path));
+    const pathKey = process.platform === "win32" ? targetPath.toLowerCase() : targetPath;
+    if (seenPaths.has(pathKey)) continue;
+    seenPaths.add(pathKey);
+
+    const fallbackId = `custom-${index + 1}`;
+    let id = String(item.id || knownTargetId(targetPath, home) || fallbackId)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || fallbackId;
+    if (seenIds.has(id)) id = `${id}-${index + 1}`;
+    seenIds.add(id);
+
+    targets.push({
+      id,
+      label: String(item.label || labelForKnownTarget(targetPath, home) || `自定义目录 ${index + 1}`),
+      path: targetPath,
+      clients: Array.isArray(item.clients) ? item.clients.map(String) : [],
+      enabled: true
+    });
+  }
+  return targets;
+}
+
+function customTarget(targetPath, label) {
+  return { path: targetPath, label, enabled: true };
+}
+
+function knownTargetId(targetPath, home) {
+  const normalized = path.resolve(targetPath);
+  if (normalized === path.join(home, ".agents", "skills")) return "agents";
+  if (normalized === path.join(home, ".claude", "skills")) return "claude-code";
+  if (normalized === path.join(home, ".workbuddy", "skills")) return "workbuddy";
+  if (normalized === path.join(home, ".codex", "skills")) return "codex-legacy";
+  return "";
+}
+
+function labelForKnownTarget(targetPath, home) {
+  const labels = {
+    agents: "Codex + MiniMax Code",
+    "claude-code": "Claude Code",
+    workbuddy: "WorkBuddy",
+    "codex-legacy": "Codex（旧目录）"
+  };
+  return labels[knownTargetId(targetPath, home)] || "";
 }
 
 function getConfigPath(options) {
@@ -629,39 +789,145 @@ function writeRepoScaffold(repoDir) {
   const metadataPath = path.join(repoDir, "skill-sync.json");
   if (!fs.existsSync(metadataPath)) {
     writeJson(metadataPath, {
-      schemaVersion: 1,
-      description: "基于 Git 的 Codex 技能同步仓库。",
+      schemaVersion: 2,
+      description: "供多个 AI Agent 客户端共用的 Agent Skills 同步仓库。",
       skillsPath: "skills"
     });
   }
 }
 
-function mirrorSkills(sourceRoot, targetRoot, options = {}) {
-  ensureDir(targetRoot);
-  const sourceSkills = listSkills(sourceRoot);
+function mergeSkillTargetsToRepo(settings, options = {}) {
+  ensureDir(settings.repoSkillsDir);
+  const snapshots = settings.skillTargets.map((target) => {
+    const targetSettings = settingsForTarget(settings, target);
+    const exists = isDirectory(target.path);
+    const names = listSkills(target.path);
+    return {
+      target,
+      settings: targetSettings,
+      exists,
+      hashes: hashSkills(target.path, names),
+      state: readApplyState(targetSettings)
+    };
+  });
+  const repoNames = listSkills(settings.repoSkillsDir);
+  const repoHashes = hashSkills(settings.repoSkillsDir, repoNames);
+  const allNames = Array.from(new Set([
+    ...repoNames,
+    ...snapshots.flatMap((snapshot) => Object.keys(snapshot.hashes)),
+    ...snapshots.flatMap((snapshot) => Object.keys(snapshot.state.skills))
+  ])).sort();
   const copied = [];
   const removed = [];
+  const skipped = [];
+  const conflicts = [];
 
-  for (const name of sourceSkills) {
-    const source = path.join(sourceRoot, name);
-    const target = path.join(targetRoot, name);
-    replaceDirectory(source, target);
+  for (const name of allNames) {
+    const repoHash = repoHashes[name];
+    const candidates = [];
+    let untrackedDifference = false;
+
+    for (const snapshot of snapshots) {
+      if (!snapshot.exists) continue;
+      const currentHash = snapshot.hashes[name] || null;
+      const previousEntry = snapshot.state.skills[name];
+      const previousHash = previousEntry ? previousEntry.hash : undefined;
+
+      if (previousHash === undefined) {
+        if (currentHash && currentHash !== repoHash) {
+          candidates.push({ snapshot, hash: currentHash, path: path.join(snapshot.target.path, name), untracked: true });
+          if (repoHash) untrackedDifference = true;
+        }
+        continue;
+      }
+
+      if (currentHash !== previousHash) {
+        candidates.push({
+          snapshot,
+          hash: currentHash,
+          path: currentHash ? path.join(snapshot.target.path, name) : "",
+          deleted: currentHash === null
+        });
+      }
+    }
+
+    const distinctHashes = new Set(candidates.map((candidate) => candidate.hash || "__deleted__"));
+    if (untrackedDifference && repoHash) distinctHashes.add(repoHash);
+    if (distinctHashes.size > 1) {
+      conflicts.push(saveTargetConflict(settings, name, candidates, repoHash));
+      continue;
+    }
+    if (!candidates.length) {
+      skipped.push(name);
+      continue;
+    }
+
+    const selected = candidates[0];
+    if (!selected.hash) {
+      if (options.prune !== false && repoHash) {
+        fs.rmSync(path.join(settings.repoSkillsDir, name), { recursive: true, force: true });
+        removed.push(name);
+      } else {
+        skipped.push(name);
+      }
+      continue;
+    }
+
+    replaceDirectory(selected.path, path.join(settings.repoSkillsDir, name));
     copied.push(name);
   }
 
-  if (options.prune) {
-    for (const name of listSkills(targetRoot)) {
-      if (!sourceSkills.includes(name)) {
-        fs.rmSync(path.join(targetRoot, name), { recursive: true, force: true });
-        removed.push(name);
-      }
-    }
-  }
-
-  return { copied, removed };
+  return { copied, removed, skipped, conflicts };
 }
 
-function applyRepoSkills(settings, options = {}) {
+function saveTargetConflict(settings, name, candidates, repoHash) {
+  const conflictRoot = path.join(path.dirname(settings.configPath), "conflicts", timestamp(), name);
+  ensureDir(conflictRoot);
+  const versions = [];
+
+  if (repoHash && fs.existsSync(path.join(settings.repoSkillsDir, name))) {
+    const incoming = path.join(conflictRoot, "repository");
+    replaceDirectory(path.join(settings.repoSkillsDir, name), incoming);
+    versions.push({ source: "同步仓库", path: incoming, hash: repoHash });
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate.hash) {
+      versions.push({ source: candidate.snapshot.target.label, path: "", hash: "", deleted: true });
+      continue;
+    }
+    const local = path.join(conflictRoot, candidate.snapshot.target.id);
+    replaceDirectory(candidate.path, local);
+    versions.push({ source: candidate.snapshot.target.label, path: local, hash: candidate.hash });
+  }
+  return { name, versions };
+}
+
+function throwIfTargetConflicts(conflicts) {
+  if (!conflicts || !conflicts.length) return;
+  throw new Error([
+    "多个客户端中存在同名但内容不同的技能，自动同步已暂停。",
+    ...conflicts.flatMap((conflict) => [
+      `  ${conflict.name}:`,
+      ...conflict.versions.map((version) => `    ${version.source}: ${version.deleted ? "已删除" : version.path}`)
+    ])
+  ].join("\n"));
+}
+
+function applyRepoSkillsToTargets(settings, options = {}) {
+  const results = settings.skillTargets.map((target) => ({
+    target,
+    result: applyRepoSkillsToTarget(settingsForTarget(settings, target), options)
+  }));
+  return {
+    applied: results.flatMap(({ target, result }) => result.applied.map((name) => `${target.label}：${name}`)),
+    conflicts: results.flatMap(({ target, result }) => result.conflicts.map((conflict) => ({ ...conflict, target: target.id, targetLabel: target.label }))),
+    skipped: results.flatMap(({ target, result }) => result.skipped.map((name) => `${target.label}：${name}`)),
+    targets: results.map(({ target, result }) => ({ ...target, ...result }))
+  };
+}
+
+function applyRepoSkillsToTarget(settings, options = {}) {
   ensureDir(settings.skillsDir);
   const repoNames = listSkills(settings.repoSkillsDir);
   const applied = [];
@@ -736,6 +1002,18 @@ function readRepoSkillHashes(repoSkillsDir) {
   ]));
 }
 
+function settingsForTarget(settings, target) {
+  return {
+    ...settings,
+    skillsDir: target.path,
+    skillTarget: target
+  };
+}
+
+function listLocalSkillNames(settings) {
+  return Array.from(new Set(settings.skillTargets.flatMap((target) => listSkills(target.path)))).sort();
+}
+
 function readApplyState(settings) {
   const statePath = getStatePath(settings);
   if (!fs.existsSync(statePath)) {
@@ -771,6 +1049,16 @@ function getStatePath(settings) {
 
 function hasApplyState(settings) {
   return fs.existsSync(getStatePath(settings));
+}
+
+function hasAnyApplyState(settings) {
+  return settings.skillTargets.some((target) => hasApplyState(settingsForTarget(settings, target)));
+}
+
+function clearApplyStates(settings) {
+  for (const target of settings.skillTargets) {
+    fs.rmSync(getStatePath(settingsForTarget(settings, target)), { force: true });
+  }
 }
 
 function withSyncLock(settings, callback) {
@@ -914,7 +1202,7 @@ function buildHookSnippet(settings, runnerCommand = "") {
             {
               type: "command",
               command: runnerCommand || `node ${shellQuote(cliPath)} sync --quiet --config ${shellQuote(settings.configPath)}`,
-              statusMessage: "正在同步 Codex 技能"
+              statusMessage: "正在同步 Agent Skills"
             }
           ]
         }
@@ -929,7 +1217,7 @@ function mergeHookConfig(current, incoming) {
   const existing = Array.isArray(merged.hooks.SessionStart) ? merged.hooks.SessionStart : [];
   const withoutOldSkillSync = existing.filter((entry) => {
     const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
-    return !hooks.some((hook) => String(hook.statusMessage || "").includes("Codex 技能") || String(hook.statusMessage || "").includes("Codex skills") || String(hook.command || "").includes("skill-sync"));
+    return !hooks.some((hook) => String(hook.statusMessage || "").includes("Codex 技能") || String(hook.statusMessage || "").includes("Agent Skills") || String(hook.statusMessage || "").includes("Codex skills") || String(hook.command || "").includes("skill-sync"));
   });
   merged.hooks.SessionStart = [...withoutOldSkillSync, ...incoming.hooks.SessionStart];
   return merged;
@@ -1074,7 +1362,7 @@ function ensureGitIdentity(repoDir) {
   }
 
   const host = os.hostname().replace(/[^A-Za-z0-9.-]/g, "-").replace(/^-+|-+$/g, "") || "computer";
-  if (!name) runGit(["config", "user.name", "Codex Skill Sync"], { cwd: repoDir });
+  if (!name) runGit(["config", "user.name", "Agent Skills Sync"], { cwd: repoDir });
   if (!email) runGit(["config", "user.email", `skill-sync@${host}.local`], { cwd: repoDir });
 }
 

@@ -19,7 +19,7 @@ const { GitHubService, RELEASE_PAGE_URL } = require("./github-service");
 const { applyProxyEnvironment, detectNetworkProxy } = require("./proxy-service");
 const { compareVersions } = require("./version-utils");
 
-const APP_NAME = "Codex 技能同步器";
+const APP_NAME = "Agent Skills 同步器";
 const syncOnceRequested = process.argv.includes("--sync-once");
 
 let mainWindow = null;
@@ -68,7 +68,7 @@ async function startDesktopApp() {
 
   if (syncOnceRequested) {
     await syncService.configurationChanged();
-    const result = await syncService.syncNow("codex-start");
+    const result = await syncService.syncNow("client-start");
     if (!result.ok && result.error) console.error(result.error);
     syncService.stop();
     app.exit(result.ok ? 0 : 1);
@@ -269,11 +269,15 @@ async function getOnboardingStatus() {
   const localSkillCount = status
     ? (status.skills || []).filter((skill) => skill.state !== "missing-local").length
     : Number(checks.localSkillCount && checks.localSkillCount.detail || 0);
+  const skillTargets = status && status.skillTargets
+    || doctor.settings && doctor.settings.skillTargets
+    || [];
 
   return {
     configured: Boolean(status),
     showOnboarding: Boolean(syncService.settings.showOnboarding),
     skillsDir: status && status.skillsDir || doctor.settings && doctor.settings.skillsDir || "",
+    skillTargets,
     localSkillCount,
     remote: status && status.remote || "",
     gitAvailable: Boolean(checks.git && checks.git.ok),
@@ -300,8 +304,8 @@ async function runSimpleSetup(options = {}) {
   const initArgs = [
     "init",
     repository.cloneUrl,
-    "--skills-dir",
-    onboarding.skillsDir
+    "--targets-json",
+    JSON.stringify(onboarding.skillTargets)
   ];
   if (role === "source") initArgs.push("--import-existing");
   initArgs.push("--json");
@@ -331,7 +335,7 @@ async function runSimpleSetup(options = {}) {
   if (options.installHook !== false) {
     const hook = await installCodexHook();
     hookInstalled = Boolean(hook.ok);
-    hookWarning = hook.ok ? "" : String(hook.error || hook.stderr || "Codex 启动同步安装失败。");
+    hookWarning = hook.ok ? "" : String(hook.error || hook.stderr || "Codex 启动检查安装失败。");
   }
 
   return {
@@ -400,7 +404,7 @@ function setLaunchAtLogin(enabled) {
 async function chooseDirectory(kind) {
   const titles = {
     repo: "选择本地同步仓库目录",
-    skills: "选择 Codex 技能目录"
+    skills: "选择客户端技能目录"
   };
   const result = await dialog.showOpenDialog(mainWindow, {
     title: titles[kind] || "选择文件夹",

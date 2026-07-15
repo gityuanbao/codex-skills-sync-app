@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node /ABSOLUTE/PATH/TO/bin/skill-sync.js sync --quiet --config /ABSOLUTE/PATH/TO/config.json",
-            "statusMessage": "正在同步 Codex 技能"
+            "statusMessage": "正在同步 Agent Skills"
           }
         ]
       }
